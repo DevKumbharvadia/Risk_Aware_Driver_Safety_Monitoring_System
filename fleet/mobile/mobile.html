@@ -14,20 +14,15 @@ output{display:block;margin:12px 2px 18px;color:#d2dedf;min-height:2.6em;font-si
 .bar{padding:10px 14px;background:#1d2b31;font-size:.88rem}.bar span{color:#b7c7cb}
 video{display:block;width:100%;height:clamp(160px,30dvh,290px);object-fit:contain}
 .view{position:relative}#faceBox{position:absolute;pointer-events:none;border:2px solid silver;transition:left .09s linear,top .09s linear,width .09s linear,height .09s linear}
-footer{margin-top:18px}button{border:1px solid #526269;border-radius:12px;padding:14px 16px;font:inherit;font-weight:650;color:white;background:#243237}
+footer{margin-top:18px}button{border:1px solid #526369;border-radius:12px;padding:14px 16px;font:inherit;font-weight:650;color:white;background:#243237}
 #start{background:#bcf674;color:#15230c;border-color:transparent;flex:1}button:disabled,#start:disabled{background:#233138;color:#94a4a7}button:focus-visible{outline:3px solid #fff}
 </style>
 <header><strong><b>◈</b> Fleet Guardian</strong><small id="connection">Standby</small></header>
 <h1>Driver monitor</h1><p id="trip">Awaiting assignment details</p>
 <section class="metrics"><div><span class="label">Driver activity</span><strong class="value" id="risk">—</strong></div><div><span class="label">Speed</span><strong class="value"><span id="speed">—</span> <small>km/h</small></strong></div></section>
 <p id="modelPrediction" hidden></p>
-<label><input id="manualMode" type="checkbox" autocomplete="off"> Manual speed (demo)</label>
-<div id="speedControls" hidden><label for="demoSpeed">Demo speed · <b id="speedSetting">0</b> km/h</label>
-<input id="demoSpeed" type="range" min="0" max="120" step="1" value="0" style="width:100%;accent-color:#bcf674"></div>
 <output id="status" aria-live="polite">Ready to connect</output>
-<details><summary>Sensor details</summary><small id="sensorDetails">Waiting for phone sensors</small>
-<p><label>Actual activity <select id="actual"><option value="safe_driving">Normal driving</option><option value="turning">Turning</option><option value="talking_phone">Talking on phone</option><option value="texting_phone">Texting</option><option value="other_activities">Other activity</option></select></label>
-<button id="example" disabled>Download labeled frame</button></p></details>
+<details><summary>Sensor details</summary><small id="sensorDetails">Waiting for phone sensors</small></details>
 <figure class="feed"><figcaption class="bar"><strong>Driver camera</strong><span id="cameraState">Off</span></figcaption><div class="view"><video id="camera" autoplay muted playsinline></video><i id="faceBox" hidden></i></div></figure>
 <footer><button id="start">Start monitoring</button><button id="stop" disabled>Stop</button></footer>
 <p><button id="calibrate" disabled>Set road-facing position</button> <small id="mountNote">For a side mount, set this while parked.</small></p>
@@ -36,18 +31,6 @@ const video=document.querySelector('video'), statusBox=document.querySelector('o
 const start=document.querySelector('#start'), stop=document.querySelector('#stop');
 const canvas=document.createElement('canvas'), token=location.hash.slice(1);
 let generation=0, watch=null, stream=null, audio=null, gps=null, motion=null, alarm=null;
-const manualMode=document.querySelector('#manualMode'), demoSpeed=document.querySelector('#demoSpeed');
-manualMode.checked=false;
-manualMode.onchange=()=>{document.querySelector('#speedControls').hidden=!manualMode.checked;};
-demoSpeed.oninput=()=>{document.querySelector('#speedSetting').textContent=demoSpeed.value;};
-let reviewedFrame=null;
-document.querySelector('#example').onclick=()=>{
-  if(!reviewedFrame)return;
-  const link=document.createElement('a');
-  link.href='data:image/jpeg;base64,'+reviewedFrame;
-  link.download=document.querySelector('#actual').value+'-'+Date.now()+'.jpg';
-  link.click();
-};
 let offset=null, syncedAt=0;
 let anchor=null, gpsStatus='', tripId=null;
 let calibration=null;
@@ -145,7 +128,6 @@ async function syncClock(){
   if(after-before>1500)throw Error('Slow Wi-Fi. Retrying connection…');
   offset=serverTime-(before+after)/2000;syncedAt=after;
 }
-
 function readMotion(e){
   function vector(obj,keys,scale){
     if(!obj || !keys.every(k=>Number.isFinite(obj[k])))return null;
@@ -155,10 +137,8 @@ function readMotion(e){
           gyroscope:vector(e.rotationRate,['beta','gamma','alpha'],Math.PI/180)};
 }
 function end(){
-  manualMode.checked=false;manualMode.onchange();demoSpeed.value=0;demoSpeed.oninput();
   field('modelPrediction').hidden=true;
-  reviewedFrame=null;field('example').disabled=true;
-  calibration=null;field('calibrate').disabled=true;field('mountNote').textContent='For a side mount, set this while parked.';
+  calibration=null;field('calibrate').disabled=false;field('mountNote').textContent='For a side mount, set this while parked.';
   showBox(null);
   generation++;
   if(watch!==null)navigator.geolocation.clearWatch(watch);
@@ -202,7 +182,6 @@ async function send(id){
     canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
     const packet={captured:Date.now()/1000,server_capture:performance.now()/1000+offset,jpeg:canvas.toDataURL('image/jpeg',.65).split(',')[1],gps};
     packet.separate_preview=true;packet.gps_status=gpsStatus;
-    if(manualMode.checked)packet.manual_speed=Number(demoSpeed.value);
     if(calibration)packet.calibrate=calibration;
     if(motion && Date.now()-motion.time<3000){
       packet.accelerometer=motion.accelerometer;packet.gyroscope=motion.gyroscope;
@@ -220,14 +199,12 @@ async function send(id){
       field('mountNote').textContent=report.mount_note || 'For a side mount, set this while parked.';
     }
     assessment(report.risk,report.speed,report.label);
-    document.querySelector('#speed').parentElement.previousElementSibling.textContent=report.speed_method==='Manual demo'?'Manual speed':'Speed';
     field('modelPrediction').hidden=!report.prediction || report.prediction===report.label || report.prediction.startsWith('Phone-use prediction rejected');
     field('modelPrediction').textContent='Model prediction · '+(report.prediction||'');
     statusBox.textContent=report.risk==='HIGH'?'High risk · '+report.reason:
       report.risk==='CAUTION'?'Caution · '+report.reason:
       report.speed===null?'Camera active · Waiting for GPS':
       report.speed===0?(report.speed_method==='GPS estimate'?'Appears stationary':'Stopped'):'No active alert';
-    reviewedFrame=packet.jpeg;field('example').disabled=false;
     field('sensorDetails').textContent=gpsDetail()+' · Raw model guess: '+(report.raw_label||report.behavior).replaceAll('_',' ')+' (score '+(report.raw_score??report.confidence).toFixed(2)+') · Handset: '+(report.handset?'detected':'unconfirmed');
     setAlarm(report.risk==='HIGH');
   }catch(error){if(id===generation){setAlarm(false);offset=null;assessment('UNKNOWN',null);field('modelPrediction').hidden=true;field('connection').textContent='Retrying';statusBox.textContent=error.message;}}
@@ -242,7 +219,7 @@ start.onclick=async()=>{
     if(id!==generation)return;
     const version=await fetch('/version',{cache:'no-store',signal:AbortSignal.timeout(4000)});
     if(!version.ok || (await version.json()).mobile!==6)
-      throw Error('Close the manager windows on the PC, restart Start Phone Fleet, then open the newly copied vehicle link.');
+      throw Error('Close the manager windows on the PC, restart the launcher, then open the newly copied vehicle link.');
     statusBox.textContent='Allow camera, location and motion access.';
     if(id!==generation)return;
     if(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function')

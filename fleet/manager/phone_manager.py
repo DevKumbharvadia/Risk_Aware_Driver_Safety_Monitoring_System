@@ -1,8 +1,15 @@
-"""One PC starts the manager dashboard and an HTTPS phone sensor terminal."""
+"""Phone-camera fleet manager: owner dashboard plus an HTTPS phone sensor terminal.
+
+One manager PC runs the dashboard and serves each vehicle a private phone link.
+A driver opens the link in Chrome; the phone streams JPEG frames and GPS, and the
+PC runs the classifier, risk rules and storage. With --trip the phone service is
+exposed over a temporary Cloudflare HTTPS tunnel instead of the trusted LAN.
+"""
 import base64
 from contextlib import ExitStack
 from datetime import datetime, timezone
 import json
+import logging
 import math
 from pathlib import Path
 import secrets
@@ -19,28 +26,22 @@ from tkinter import ttk
 from http.server import ThreadingHTTPServer
 from urllib.parse import urlsplit
 
-from fleet.network import ApiClient
-from fleet.face_preview import FacePreview, behavior_label, classifier_summary
-from fleet.face_activity import FaceActivity
-from fleet.owner_ui import OwnerApp
-from fleet.phone_speed import PhoneHandler, PhoneSpeed
-from fleet.risk import Measurements, RiskEngine
-from fleet.server import FleetServer
-from fleet.storage import Store, utc_now
-from main import PROJECT_DIR, load_config
+from .network import ApiClient
+from ..perception.face_preview import FacePreview, behavior_label, classifier_summary
+from ..perception.face_activity import FaceActivity
+from .owner_ui import OwnerApp
+from ..mobile.phone_speed import PhoneHandler, PhoneSpeed
+from ..risk.engine import Measurements, RiskEngine
+from .server import FleetServer
+from .storage import Store, utc_now
+
+TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools"
+MOBILE_PAGE = Path(__file__).resolve().parents[1] / "mobile" / "mobile.html"
 
 
 def apply_vehicle_speed(readings, data):
-    if "manual_speed" in data:
-        speed = data["manual_speed"]
-        if type(speed) is not int or not 0 <= speed <= 120:
-            raise ValueError("Manual speed must be a whole number from 0 to 120 km/h.")
-        readings.speed = speed
-        readings.motion_source = "simulation"
-        readings.speed_method = "Manual demo"
-        return
-
     gps = PhoneSpeed()
+    fix = {}
     if data.get("gps"):
         try:
             fix = data["gps"]
@@ -132,7 +133,7 @@ class MobileHandler(PhoneHandler):
             return self.respond(200, json.dumps(time.monotonic()).encode(), "application/json")
         if urlsplit(self.path).path != "/":
             return self.respond(404, b"Unknown page")
-        self.respond(200, (PROJECT_DIR/"fleet/mobile.html").read_bytes(), "text/html; charset=utf-8")
+        self.respond(200, MOBILE_PAGE.read_bytes(), "text/html; charset=utf-8")
 
     def do_POST(self):
         try:
@@ -162,26 +163,30 @@ class MobileHandler(PhoneHandler):
             result = link.receive(self.server.fleet, json.loads(body))
             self.respond(200, json.dumps(result).encode(), "application/json")
         except (ValueError, KeyError, TypeError, OSError) as error:
+            logging.warning("Phone sample rejected: %s", error)
             self.respond(400, str(error).encode())
         except Exception:
+            logging.exception("Phone sample failed")
             self.respond(500, b"Model or fleet service unavailable. Check PC setup.")
 
 
-def main(remote=False):
-    data = PROJECT_DIR / "data"
+def run_manager(args, config):
+    """Start the owner dashboard and the phone sensor terminal for every vehicle."""
+    data = args.data_dir
+    remote = args.trip
     if remote:
-        from fleet.trip_network import trip_proxy
+        from ..tunnel.cloudflare import trip_proxy
         address = "127.0.0.1"
     else:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
             probe.connect(("192.0.2.1", 9))
             address = probe.getsockname()[0]
+    logging.info("Fleet manager starting (trip=%s) on %s", remote, address)
     certs = data / ("phone-link-" + address)
     if not remote and not (certs/"server.crt").exists():
-        subprocess.run([sys.executable, str(PROJECT_DIR/"tools/create_gps_certificate.py"),
+        subprocess.run([sys.executable, str(TOOLS_DIR / "create_gps_certificate.py"),
                         address, "--output", str(certs)], check=True)
-    config = load_config(data/"config.json")
-    store = Store(data/"fleet.sqlite3")
+    store = Store(data / "fleet.sqlite3")
     store.seed()
     fleet = FleetServer(("127.0.0.1", 0), store, config["owner_token"], config["device_token"])
     with fleet, ThreadingHTTPServer((address, 0 if remote else 8766), MobileHandler) as mobile, ExitStack() as stack:
@@ -192,6 +197,7 @@ def main(remote=False):
             tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
             tls.load_cert_chain(certs/"server.crt", certs/"server.key")
             mobile.socket = tls.wrap_socket(mobile.socket, server_side=True)
+        logging.info("Phone terminal ready at %s", base_url)
         mobile.fleet = fleet
         mobile.links = {}
         threading.Thread(target=fleet.serve_forever, daemon=True).start()
@@ -228,15 +234,9 @@ def main(remote=False):
         refresh()
         ttk.Button(pairing, text="Refresh vehicle list", command=refresh).pack(pady=6)
         pairing.protocol("WM_DELETE_WINDOW", pairing.iconify)
+        logging.info("Fleet manager ready; waiting for owner dashboard and phones")
         try:
             root.mainloop()
         finally:
             mobile.shutdown()
             fleet.shutdown()
-
-
-if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--trip", action="store_true", help="Driver access over a temporary Cloudflare HTTPS tunnel")
-    main(remote=parser.parse_args().trip)

@@ -1,5 +1,13 @@
-# Optional: only needed for real webcam capture and preview.
-# The complete simulated fleet demo uses the Python standard library.
+# Single dependency set for the phone-camera fleet manager.
+# Camera capture, preview and the face-landmarker run on the manager PC.
 opencv-python>=4.10,<5
 Pillow>=10.4,<13
 mediapipe==1.0.1
+# Local HTTPS certificate generation for the phone sensor terminal.
+cryptography>=43
+# CPU PyTorch/torchvision wheels matching the Colab model export.
+# The index is switched only for the two packages below so the others come from PyPI.
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
+torch==2.11.0
+torchvision==0.26.0

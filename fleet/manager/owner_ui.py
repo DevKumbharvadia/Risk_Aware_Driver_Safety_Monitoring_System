@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from urllib.parse import urlencode
 
-from .face_preview import behavior_label, classifier_summary
+from ..perception.face_preview import behavior_label, classifier_summary
 from .network import ApiError
 from .ui_common import COLORS, fill_table, local_time, make_table, setup_style, vehicle_status
 
@@ -430,12 +430,10 @@ class OwnerApp:
         missing_speed = (readings.get("speed_method") == "unavailable" or
                          readings.get("assessment_note", "").startswith(("Waiting for phone GPS", "Phone GPS")))
         activity = behavior_label(readings.get("behavior"), readings.get("confidence", 0),
-                                  readings.get("face_activity", ""), readings.get("handset_visible")) if camera else "Simulation"
+                                  readings.get("face_activity", ""), readings.get("handset_visible")) if camera else "Awaiting camera"
         speed = "Speed unavailable" if missing_speed else f"{readings.get('speed', '—')} km/h"
         if readings.get("speed_method") == "GPS estimate":
             speed += " (estimated)"
-        elif readings.get("speed_method") == "Manual demo":
-            speed += " (demo)"
         display_state = "Monitoring" if camera and state == "UNKNOWN" else live_status(state, readings)
         self.monitor_heading.configure(text=f"{vehicle['registration']}  •  {display_state}", foreground=COLORS.get(state, "#15283f"))
         details = f"{trip.get('driver_name', 'Unassigned')}  •  {trip.get('route_name', 'No route')}"

@@ -9,7 +9,7 @@ class FaceActivity:
     def __init__(self):
         import mediapipe as mp
         from mediapipe.tasks.python import BaseOptions, vision
-        path = Path(__file__).resolve().parents[1] / "models" / "face_landmarker.task"
+        path = Path(__file__).resolve().parents[2] / "models" / "face_landmarker.task"
         options = vision.FaceLandmarkerOptions(base_options=BaseOptions(model_asset_path=str(path)),
             output_face_blendshapes=True, output_facial_transformation_matrixes=True)
         self.model = vision.FaceLandmarker.create_from_options(options)

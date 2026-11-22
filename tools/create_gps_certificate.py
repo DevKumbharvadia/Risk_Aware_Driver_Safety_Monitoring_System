@@ -45,7 +45,7 @@ def main():
     (args.output/"server.key").write_bytes(server_key.private_bytes(serialization.Encoding.PEM,
         serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
     # CA private key is deliberately not saved; only this one server certificate is issued.
-    print(f"Created certificates in {args.output}. Transfer only phone-ca.crt to your phone. See docs/PHONE_GPS.md.")
+    print(f"Created certificates in {args.output}. Transfer only phone-ca.crt to your phone. See README.md for the phone setup.")
 
 
 if __name__ == "__main__":

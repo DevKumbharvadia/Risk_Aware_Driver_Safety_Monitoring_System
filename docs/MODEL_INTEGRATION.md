@@ -2,11 +2,11 @@
 
 On the browser phone client, a talking score of at least 0.90 with a hidden handset triggers a [hand landmark check](https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task). Repeated observations of a hand beside the ear spanning at least 1.25 seconds display **Possible call**. This cue alone adds no phone-use risk points. Touching the ear can also produce this pose.
 
-The browser-phone launcher also runs Google's [Face Landmarker](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task) on the manager PC. Both eye-blink scores above the demo threshold (0.55 or higher) indicate closed eyes. An absolute head yaw of at least 25 degrees indicates looking aside. This measures head direction, not eye gaze. Phone and owner display the camera observation independently of GPS. Missing speed leaves motion-dependent alerts pending. With speed available the existing temporal rules apply, including the two-second eye closure rule and the low-speed turning allowance. Test thresholds on the demonstration camera, particularly when wearing glasses.
+The browser-phone launcher also runs Google's [Face Landmarker](https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task) on the manager PC. Both eye-blink scores above the threshold (0.55 or higher) indicate closed eyes. An absolute head yaw of at least 25 degrees indicates looking aside. This measures head direction, not eye gaze. Phone and owner display the camera observation independently of GPS. Missing speed leaves motion-dependent alerts pending. With speed available the existing temporal rules apply, including the two-second eye closure rule and the low-speed turning allowance. Test thresholds on the camera, particularly when wearing glasses.
 
-Live phone-use predictions also require a visible handset in the same frame. The PC runs TorchVision SSDLite320 on each assessed frame. An ambiguous handset candidate gets a second pass on enlarged crops. An independently detected handset displays as “Phone visible” unless the behavior model also supports a specific use. Its [COCO weights](https://download.pytorch.org/models/ssdlite320_mobilenet_v3_large_coco-a79551df.pth) ship in the models folder. The 0.5 handset score cutoff is a prototype setting. An unconfirmed candidate displays as “Observing driver” and cannot accumulate phone-use risk. Small or hidden handsets may be missed, and the detector cannot establish who owns a phone elsewhere in the image. The Colab accuracy refers to the original behavior classifier.
+Live phone-use predictions also require a visible handset in the same frame. The PC runs TorchVision SSDLite320 on each assessed frame. An ambiguous handset candidate gets a second pass on enlarged crops. An independently detected handset displays as "Phone visible" unless the behavior model also supports a specific use. Its [COCO weights](https://download.pytorch.org/models/ssdlite320_mobilenet_v3_large_coco-a79551df.pth) ship in the models folder. The 0.5 handset score cutoff is a prototype setting. An unconfirmed candidate displays as "Observing driver" and cannot accumulate phone-use risk. Small or hidden handsets may be missed, and the detector cannot establish who owns a phone elsewhere in the image. The Colab accuracy refers to the original behavior classifier.
 
-The team trained MobileNetV3 Small in Colab using transfer learning, then partially fine-tuned its final feature blocks. The export is now used by `fleet/model_detector.py`. Predictions run on the CPU without a GPU or model download at startup.
+The team trained MobileNetV3 Small in Colab using transfer learning, then partially fine-tuned its final feature blocks. The export is now used by `fleet/perception/trained_model.py`. Predictions run on the CPU without a GPU or model download at startup.
 
 ## Export and results
 
@@ -30,7 +30,7 @@ These metrics came from the user's Colab run. Local tests check loading and inte
 5. Run the exported five-output model in evaluation/inference mode on the CPU.
 6. Apply softmax and preserve the top label and score.
 
-The checkpoint loads with `weights_only=True`, strict state-dictionary matching, and validated architecture, labels and preprocessing. Constructing with `weights=None` avoids replacing the trained weights or downloading ImageNet weights. Imports are lazy, so owner-only and simulation usage do not require PyTorch.
+The checkpoint loads with `weights_only=True`, strict state-dictionary matching, and validated architecture, labels and preprocessing. Constructing with `weights=None` avoids replacing the trained weights or downloading ImageNet weights. Imports are lazy, so the owner console does not require PyTorch.
 
 ## Class mapping and decisions
 
@@ -44,15 +44,15 @@ The checkpoint loads with `weights_only=True`, strict state-dictionary matching,
 
 The classifier cannot identify a missing driver, yawning or eye closure. `face_visible` is `None`, not `True`, in model mode. The UI explicitly says driver presence is unmeasured. A classifier can be confidently wrong on an empty or unfamiliar scene; a score cutoff cannot replace a driver-presence detector.
 
-Scores below 0.65 produce UNKNOWN. This is a demonstration threshold, not a calibrated confidence claim. Temporal rules are demonstration settings too. No thresholds were selected using the test set.
+Scores below 0.65 produce UNKNOWN. This is an uncalibrated threshold, not a calibrated confidence claim. Temporal rules are prototype settings too. No thresholds were selected using the test set.
 
-`fleet/attention.py` defines the speed policy: manoeuvring at up to 10 km/h, moderate speed through 30 km/h, and faster travel above that. Band changes use a 2 km/h hysteresis margin and two-second confirmation. Attention duration resets on a confirmed change, so manoeuvring time cannot cause an immediate alert after acceleration. This changes the risk layer, not the trained model. Phone use remains subject to its own duration rules. Speed does not establish reverse gear or road geometry; it is explicitly shown as simulated in this prototype.
+`fleet/risk/attention.py` defines the speed policy: manoeuvring at up to 10 km/h, moderate speed through 30 km/h, and faster travel above that. Band changes use a 2 km/h hysteresis margin and two-second confirmation. Attention duration resets on a confirmed change, so manoeuvring time cannot cause an immediate alert after acceleration. This changes the risk layer, not the trained model. Phone use remains subject to its own duration rules. Speed does not establish reverse gear or road geometry.
 
 ## Threading and freshness
 
-The camera worker owns the detector and loads it once. `LatestObservation` holds one result and its monotonic capture time. A generation counter discards in-flight results after changing camera or model modes. Results older than 2.5 seconds produce UNKNOWN. Repainting the same result does not add observed duration. Changing source resets the risk engine.
+The manager PC's `MobileHandler` runs each phone POST on a server thread and hands the frame to that vehicle's `VehicleLink`, which calls the trained detector and the risk engine under a per-vehicle lock. `LatestObservation` holds one result and its monotonic capture time; a generation counter discards in-flight results after a source change, and results older than 2.5 seconds produce UNKNOWN. Repainting the same result does not add observed duration, and a confirmed source or trip change resets the risk engine.
 
-The Tkinter timer combines the latest prediction with simulated speed/acceleration and passes it to `DeviceSession`. Neural inference never runs on the UI thread. The network worker uploads the latest preview separately, so server outages cannot block the camera/model worker. Camera activation and video sharing are independent controls.
+Neural inference never runs on the owner UI thread. The owner app polls the fleet API for live monitoring; it never blocks on a phone frame. The phone uploads preview JPEGs separately, so a slow preview cannot block classification.
 
 ## Telemetry
 
@@ -61,11 +61,11 @@ The existing JSON and SQLite readings retain `source`, `motion_source`, `behavio
 ## Future work
 
 - Driver-presence detection and a dedicated eye-closure/drowsiness detector.
-- Additional motion inputs beyond the optional phone GPS bridge (for example OBD-II).
+- Additional motion inputs beyond phone GPS (for example OBD-II).
 - Driver/session-independent evaluation and confidence calibration on separate footage.
 - Bounding boxes only if an object detector is trained; this is a whole-image classifier.
-- A complete mobile monitoring client; the existing phone bridge supplies GPS speed only. Tkinter remains the desktop interface.
+- A complete native mobile monitoring client; the browser phone page is a sensor terminal, not a standalone app.
 
-## Optional GPS motion source
+## GPS motion source
 
-The simulated-motion descriptions above apply to the default mode. With `--phone-gps`, the timer combines predictions with fresh phone speed instead. `motion_source` is `phone_gps`; acceleration is unmeasured and its zero field is a placeholder. Missing, poor or stale fixes force UNKNOWN before stopped-vehicle suppression. See [Phone GPS setup](PHONE_GPS.md).
+The phone supplies speed from its GPS. `motion_source` is `phone_gps`; acceleration is unmeasured and its zero field is a placeholder. Missing, poor or stale fixes force UNKNOWN before stopped-vehicle suppression. The phone browser estimates slow speeds from displacement when the GPS speed field is unavailable.

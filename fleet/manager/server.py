@@ -1,5 +1,4 @@
 """Local/LAN fleet server. Interfaces never access SQLite directly."""
-import base64
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import hmac
@@ -9,37 +8,6 @@ from io import BytesIO
 import sqlite3
 from threading import Lock
 from urllib.parse import parse_qs, urlparse
-
-from .risk import Measurements
-
-
-def validate_sample(data):
-    if not isinstance(data, dict):
-        raise ValueError("Expected a JSON object.")
-    for name in ("vehicle_id", "trip_id"):
-        if type(data.get(name)) is not int or data[name] < 1:
-            raise ValueError(f"Invalid {name}.")
-    if not isinstance(data.get("id"), str) or not 1 <= len(data["id"]) <= 100:
-        raise ValueError("Invalid sample identifier.")
-    try:
-        captured = datetime.fromisoformat(data["captured_at"])
-        if captured.tzinfo is None:
-            raise ValueError("Timestamp needs a timezone.")
-        captured = captured.astimezone(timezone.utc)
-        if (captured - datetime.now(timezone.utc)).total_seconds() > 30:
-            raise ValueError("Timestamp is in the future. Check the device clock.")
-        data["captured_at"] = captured.isoformat(timespec="milliseconds")
-    except (KeyError, TypeError, ValueError) as error:
-        raise ValueError("Invalid capture time: " + str(error)) from error
-    data["readings"] = Measurements.from_dict(data.get("readings")).to_dict()
-    risk = data.get("risk")
-    if not isinstance(risk, dict) or risk.get("level") not in ("LOW", "CAUTION", "HIGH", "UNKNOWN"):
-        raise ValueError("Invalid risk result.")
-    if type(risk.get("score")) is not int or not 0 <= risk["score"] <= 100:
-        raise ValueError("Risk score must be 0–100.")
-    if not isinstance(risk.get("reason"), str) or len(risk["reason"]) > 500:
-        raise ValueError("Invalid risk reason.")
-    return data
 
 
 class FleetServer(ThreadingHTTPServer):
@@ -58,7 +26,7 @@ class FleetServer(ThreadingHTTPServer):
     def classify(self, jpeg):
         from PIL import Image
         import numpy as np
-        from .model_detector import DEFAULT_MODEL, TrainedDetector
+        from ..perception.trained_model import DEFAULT_MODEL, TrainedDetector
         with Image.open(BytesIO(jpeg)) as picture:
             if picture.format != "JPEG" or max(picture.size) > 1024:
                 raise ValueError("Expected a JPEG up to 1024 pixels per side.")
@@ -132,22 +100,18 @@ class Handler(BaseHTTPRequestHandler):
             self.respond(500, {"error": "Server error. See the server log."})
 
     def get_route(self, path, query):
-        if path == "/health":
-            self.respond(200, {"status": "ok"})
-        elif path == "/snapshot":
+        if path == "/snapshot":
             self.respond(200, self.server.store.snapshot())
         elif path == "/logs":
             filters = {key: values[0] for key, values in query.items() if key in ("vehicle_id", "driver_id", "level", "since", "until")}
             self.respond(200, self.server.store.logs(**filters))
-        elif path.startswith("/assignment/"):
-            self.respond(200, {"trip": self.server.store.assignment(int(path.split("/")[-1]))})
         elif path.startswith("/frame/"):
             vehicle_id = int(path.split("/")[-1])
             with self.server.frame_lock:
                 frame = self.server.frames.get(vehicle_id)
             trip = self.server.store.assignment(vehicle_id)
             if not frame or not trip or frame[2] != trip["id"] or (datetime.now(timezone.utc) - frame[0]).total_seconds() > 6:
-                self.respond(404, {"error": "No recent camera frame. Enable camera sharing in the driver window."})
+                self.respond(404, {"error": "No recent camera frame from this vehicle's phone."})
             else:
                 self.respond(200, frame[1], "image/jpeg")
         else:
@@ -163,20 +127,5 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/end-trip":
             store.end_trip(int(data["trip_id"]))
             self.respond(200, {"ok": True})
-        elif path == "/telemetry":
-            store.add_sample(validate_sample(data))
-            self.respond(200, {"ok": True})
-        elif path in ("/camera", "/phone-frame"):
-            vehicle_id, trip_id = int(data["vehicle_id"]), int(data["trip_id"])
-            trip = store.assignment(vehicle_id)
-            if not trip or trip["id"] != trip_id:
-                raise ValueError("Camera requires the current active trip.")
-            frame = base64.b64decode(data["jpeg"], validate=True)
-            if len(frame) > 250_000 or not frame.startswith(b"\xff\xd8"):
-                raise ValueError("Expected a small JPEG frame.")
-            readings = self.server.classify(frame) if path == "/phone-frame" else None
-            with self.server.frame_lock:
-                self.server.frames[vehicle_id] = (datetime.now(timezone.utc), frame, trip_id)
-            self.respond(200, {"readings": readings.to_dict()} if readings else {"ok": True})
         else:
             self.respond(404, {"error": "Unknown endpoint."})

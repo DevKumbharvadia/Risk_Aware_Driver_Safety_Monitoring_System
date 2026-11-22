@@ -1,12 +1,8 @@
-"""One phone supplies speed to one driver process over authenticated HTTPS."""
-import json
+"""Phone GPS speed extraction and the shared HTTPS request-handler base."""
 import math
-from pathlib import Path
-import secrets
-import ssl
 import threading
 import time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler
 
 
 class PhoneSpeed:
@@ -62,20 +58,9 @@ class PhoneSpeed:
         return readings
 
 
-class PhoneSpeedServer(ThreadingHTTPServer):
-    daemon_threads = True
-
-    def __init__(self, address, certificate, key):
-        self.speed = PhoneSpeed()
-        self.token = secrets.token_urlsafe(24)
-        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
-        context.load_cert_chain(certificate, key)
-        super().__init__(address, PhoneHandler)
-        self.socket = context.wrap_socket(self.socket, server_side=True)
-
-
 class PhoneHandler(BaseHTTPRequestHandler):
+    """Base handler: connection timeout, silent request logging and a JSON/raw responder."""
+
     def setup(self):
         super().setup()
         self.connection.settimeout(5)
@@ -91,23 +76,3 @@ class PhoneHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(body)
-
-    def do_GET(self):
-        if self.path != "/":
-            return self.respond(404, b"Not found")
-        self.respond(200, Path(__file__).with_name("phone_speed.html").read_bytes(), "text/html; charset=utf-8")
-
-    def do_POST(self):
-        try:
-            length = int(self.headers.get("Content-Length", "0"))
-            if not 0 < length <= 1024:
-                return self.respond(400, b"Invalid body size")
-            body = self.rfile.read(length)
-            if self.path != "/speed":
-                return self.respond(404, b"Not found")
-            if not secrets.compare_digest(self.headers.get("Authorization", ""), "Bearer " + self.server.token):
-                return self.respond(401, b"Invalid pairing code")
-            self.server.speed.accept(json.loads(body))
-            self.respond(200, b"OK")
-        except (ValueError, UnicodeError) as error:
-            self.respond(400, str(error).encode())

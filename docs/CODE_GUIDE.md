@@ -3,39 +3,50 @@
 ## Architecture
 
 ```text
-Driver Tkinter controls / trained camera classifier
+Driver phone (Chrome: camera + GPS + accelerometer + gyroscope)
                     |
-               Measurements
+              HTTPS JSON / JPEG frames
                     |
-               RiskEngine
-                /       \
-       local warning     SQLite outbox
-                              |
-                        HTTP JSON API
-                              |
-                     FleetServer + Store
-                              |
-                         SQLite database
-                              |
-                       Owner Tkinter app
+            MobileHandler -> VehicleLink (one per vehicle)
+                    |
+          TrainedDetector + FaceActivity + RiskEngine
+                    |
+               FleetServer + Store
+                    |
+                 SQLite database
+                    |
+          Owner Tkinter app (manager PC)
 
-Optional webcam -> JPEG -> server memory -> selected owner preview
+Optional preview JPEG -> server memory -> owner Live monitoring
 ```
 
-Behavior measurements and camera preview are separate. The camera worker can run the trained classifier locally without sharing video with the owner. Speed and acceleration still come from explicitly simulated controls. The model does not infer eye closure or yawning.
+A phone is a thin browser client: it captures frames and sensors and posts them to the manager PC. The manager classifies each frame, combines the prediction with phone GPS speed and motion, runs the temporal risk rules and stores the sample. Speed and acceleration come from the phone; the classifier does not infer eye closure or yawning, but the Face Landmarker supplies blink and head-direction cues.
+
+## Project layout
+
+```text
+fleet/
+  risk/        risk assessment engine — engine.py, attention.py
+  perception/  driver perception — base.py, trained_model.py, face_activity.py, face_preview.py
+  manager/     manager side — server.py, storage.py, network.py, owner_ui.py, phone_manager.py, ui_common.py
+  mobile/      phone terminal — phone_speed.py, mobile.html
+  tunnel/      Cloudflare tunnel — cloudflare.py
+main.py        entry point
+```
+
+Dependencies point inward: `manager` uses `perception`, `risk`, `mobile` and `tunnel`; `perception` uses `risk`; `risk`, `mobile` and `tunnel` depend only on the standard library and their own assets.
 
 ## Read the code in this order
 
-1. `fleet/risk.py`: small data classes, input validation, temporal risk calculation.
-2. `fleet/detectors.py`: abstract interface, manually controlled and scenario implementations.
-   `fleet/model_detector.py`: trained CPU classifier, exact preprocessing, confidence handling and observation freshness.
-3. `fleet/storage.py`: database schema, CRUD, transactional assignments, logs.
-4. `fleet/network.py`: one HTTP client method and a custom exception.
-5. `fleet/server.py`: URL routing, authorization, validation, persistence.
-6. `fleet/device.py`: local evaluation, durable queue, retry and deduplication behavior.
-7. `fleet/driver_ui.py`: driver controls, local warnings, background networking/camera.
-8. `fleet/owner_ui.py`: sidebar pages, tables, dialogs, live monitoring, export.
-9. `main.py` and `fleet/demo.py`: startup and the multi-device demonstration.
+1. `fleet/risk/engine.py` and `fleet/risk/attention.py`: risk data model, input validation, temporal rules and speed-aware attention.
+2. `fleet/perception/base.py` and `fleet/perception/trained_model.py`: the detector interface and the trained CPU classifier.
+   `fleet/perception/face_activity.py` and `fleet/perception/face_preview.py`: face/head cues and preview annotation.
+3. `fleet/manager/storage.py`: database schema, CRUD, transactional assignments, logs.
+4. `fleet/manager/network.py`: one HTTP client method and a custom exception.
+5. `fleet/manager/server.py`: URL routing, authorization, persistence.
+6. `fleet/manager/phone_manager.py`: per-vehicle phone links, frame intake, risk and storage on the manager PC.
+7. `fleet/manager/owner_ui.py`: sidebar pages, tables, dialogs, live monitoring, export.
+8. `main.py`: the phone-camera manager entry point.
 
 ## Python concepts used for a reason
 
@@ -46,18 +57,17 @@ Behavior measurements and camera preview are separate. The camera worker can run
 | Lists, tuples, dictionaries | Rows, rules, records, snapshots and JSON messages |
 | Deque | Rolling history of yawning episodes |
 | Data classes | Explicit fields in `Measurements` and `RiskResult` |
-| Object-oriented programming | `Store`, `ApiClient`, `DeviceSession`, UI classes |
-| Abstraction and polymorphism | `Detector.read()` implemented by different input sources |
-| Composition | `DeviceSession` contains an API client, risk engine and outbox |
+| Object-oriented programming | `Store`, `ApiClient`, `VehicleLink`, UI classes |
+| Abstraction and polymorphism | `Detector.read()` implemented by the trained classifier |
+| Composition | `VehicleLink` owns a risk engine and a face tracker; the manager owns the store and fleet server |
 | Modules and packages | Separate storage, networking, UI and business rules |
 | Exceptions | `ApiError`, validation errors and recoverable camera failures |
 | Context managers | Database transactions, files and HTTP responses close reliably |
 | File handling | Config JSON, CSV export, rotating diagnostic logs |
 | SQLite | Relationships, constraints, indexes, transactions and parameterized queries |
-| Threads and synchronization | HTTP workers, camera thread, lock around assignment/risk state |
+| Threads and synchronization | HTTP workers, the phone terminal, locks around per-vehicle risk state |
 | Queues and events | Workers communicate with the Tkinter main thread without modifying widgets |
 | Inheritance | HTTP request handler and detector implementations |
-| Standard-library testing | Unit tests and HTTP/database integration tests |
 
 We do not add advanced concepts merely to make the code look larger. For example, a generator or decorator is useful only when it simplifies a real responsibility. `@dataclass`, `@contextmanager`, and `@abstractmethod` already demonstrate purposeful decorators.
 
@@ -65,29 +75,28 @@ We do not add advanced concepts merely to make the code look larger. For example
 
 - **Single responsibility:** the risk engine computes risk, the store manages persistence, and UI classes manage widgets.
 - **Separation of concerns:** widgets do not contain SQL; the server does not manipulate widgets.
-- **Dependency injection:** constructors receive a store, API client or device session, making tests independent of production data.
+- **Dependency injection:** constructors receive a store, API client or link, keeping collaborators swappable.
 - **Open for extension:** the trained detector implements `read()` without redesigning the database. More detectors can use the same interface later.
-- **Composition over unnecessary inheritance:** the session owns collaborators rather than inheriting their behavior.
-- **One source of truth:** trips and fleet records live on the server; local device state handles immediate warnings and queued telemetry.
+- **Composition over unnecessary inheritance:** a link owns its collaborators rather than inheriting their behavior.
+- **One source of truth:** trips and fleet records live on the server; the phone terminal streams to it.
 - **Explicit limitations:** UNKNOWN and OFFLINE are distinct from LOW risk.
 
 ## Threading explanation
 
-Tkinter runs its event loop on the main thread. Blocking network requests would freeze the window, so a worker performs HTTP requests and sends results through a queue. The main thread uses `after()` to read that queue and update widgets. The driver computes local risk on a regular Tkinter timer while separate workers handle HTTP and camera capture. A lock prevents assignment changes from racing with sample creation.
+The manager PC runs two `ThreadingHTTPServer`s — the fleet API and the phone terminal — each on its own thread pool. A phone POST is handled by `MobileHandler`, which hands the frame to that vehicle's `VehicleLink`. A lock on each link prevents a frame from racing with assignment or risk-state changes. The Tkinter owner app runs on the main thread and refreshes by polling the fleet API; it never blocks on a phone frame.
 
 ## Database integrity explanation
 
-Each trip references one vehicle, driver and route. Partial unique indexes prevent a vehicle or driver from appearing in two active trips. Changing an assignment is one transaction: either both ending the old trip and creating the new one succeed, or neither does. Historical names are copied into the trip at creation time. Sample UUIDs make retry delivery idempotent.
+Each trip references one vehicle, driver and route. Partial unique indexes prevent a vehicle or driver from appearing in two active trips. Changing an assignment is one transaction: either both ending the old trip and creating the new one succeed, or neither does. Historical names are copied into the trip at creation time. Sample UUIDs make delivery idempotent if a frame is resent.
 
 ## Suggested demonstration order
 
 1. Explain the problem: a fleet owner needs actionable warnings and vehicle context.
-2. Launch `main.py demo` and introduce the two interfaces.
-3. Trigger prolonged eye closure; show the local sound and owner event.
-4. Demonstrate recovery, UNKNOWN, and stopped-vehicle suppression.
+2. Run `main.py` and introduce the owner dashboard and the **Connect a driver phone** window.
+3. Open a vehicle's phone link on a phone, allow camera and location, and show the live class, score, speed and risk on the owner's **Live monitoring** page.
+4. Trigger prolonged eye closure (or a looking-away posture) while moving and show the HIGH risk and the owner event; then show recovery and the below-3 km/h suppression.
 5. Add a driver and change a trip; explain why earlier logs retain their old driver.
 6. Filter logs by vehicle or driver and export CSV.
-7. Enable **Use trained model**, explain the class score and simulated motion, then optionally enable video sharing. Explain why `other_activities` is UNKNOWN and why this model cannot measure drowsiness.
-8. Run the tests and explain one risk test and one transaction test.
+7. Run `--trip` to demonstrate a phone reaching the manager over mobile data.
 
-For a live disconnection demonstration, run server/owner/driver separately. Stop the server while keeping the driver open, trigger a warning, then restart the server with the same data directory. Local warnings continue and queued readings replay. If an assignment changed while the client was offline, readings outside the old trip are preserved as rejected records rather than attributed to the wrong driver.
+For a live disconnection demonstration, stop the manager while a phone is connected, then restart it with the same data directory. The phone reconnects and resumes; samples captured during the gap are not attributed to the wrong trip.

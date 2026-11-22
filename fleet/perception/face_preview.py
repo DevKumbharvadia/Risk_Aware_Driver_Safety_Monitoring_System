@@ -4,7 +4,7 @@ from pathlib import Path
 import threading
 import time
 
-from .model_detector import DEFAULT_THRESHOLD
+from .trained_model import DEFAULT_THRESHOLD
 
 
 def classifier_summary(label, score, handset_visible=None):

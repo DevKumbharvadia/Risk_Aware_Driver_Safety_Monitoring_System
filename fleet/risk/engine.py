@@ -1,4 +1,4 @@
-"""Explainable temporal rules. These are demo rules, not a trained model."""
+"""Explainable temporal rules. These are prototype rules, not a trained model."""
 from dataclasses import asdict, dataclass
 from collections import deque
 from .attention import AttentionPolicy, SpeedContext
@@ -71,7 +71,7 @@ class Measurements:
             raise ValueError("Unknown motion source.")
         result.motion_source = values.get("motion_source", "simulation")
         result.speed_method = values.get("speed_method", "")
-        if result.speed_method not in ("", "GPS", "GPS estimate", "unavailable", "Manual demo"):
+        if result.speed_method not in ("", "GPS", "GPS estimate", "unavailable"):
             raise ValueError("Unknown speed measurement method.")
         if result.motion_source == "phone_gps" and result.acceleration != 0:
             raise ValueError("Phone GPS does not measure acceleration in this version.")

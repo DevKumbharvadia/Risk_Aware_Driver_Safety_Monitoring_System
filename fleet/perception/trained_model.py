@@ -6,12 +6,12 @@ from pathlib import Path
 import threading
 import time
 
-from .detectors import Detector
-from .risk import Measurements
+from .base import Detector
+from ..risk.engine import Measurements
 
-DEFAULT_MODEL = Path(__file__).resolve().parents[1] / "models" / "driver_behavior" / "driver_behavior.pth"
+DEFAULT_MODEL = Path(__file__).resolve().parents[2] / "models" / "driver_behavior" / "driver_behavior.pth"
 CLASS_NAMES = {"other_activities", "safe_driving", "talking_phone", "texting_phone", "turning"}
-DEFAULT_THRESHOLD = 0.65  # Demo decision threshold, not a calibrated probability of correctness.
+DEFAULT_THRESHOLD = 0.65  # Decision threshold, not a calibrated probability of correctness.
 PHONE_WEIGHTS = DEFAULT_MODEL.parents[1] / "ssdlite320_mobilenet_v3_large_coco-a79551df.pth"
 
 

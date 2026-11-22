@@ -60,11 +60,11 @@ class Store:
             if any(db.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in ("vehicles", "drivers", "routes")):
                 return
             for index, name in enumerate(("Aarav Shah", "Meera Patel", "Kabir Desai"), 1):
-                db.execute("INSERT INTO drivers(name, license, phone) VALUES(?,?,?)", (name, f"DEMO-DL-{index}", "Demo contact"))
-                db.execute("INSERT INTO vehicles(registration, model) VALUES(?,?)", (f"DEMO-{index:03}", "Lab vehicle"))
+                db.execute("INSERT INTO drivers(name, license, phone) VALUES(?,?,?)", (name, f"LIC-{index:03}", "Contact"))
+                db.execute("INSERT INTO vehicles(registration, model) VALUES(?,?)", (f"VEH-{index:03}", "Lab vehicle"))
                 db.execute("INSERT INTO routes(name, origin, destination) VALUES(?,?,?)", (f"Route {index}", "Depot", ("Campus", "Station", "Warehouse")[index-1]))
                 db.execute("INSERT INTO trips(vehicle_id, driver_id, route_id, started_at, driver_name, vehicle_name, route_name) VALUES(?,?,?,?,?,?,?)",
-                           (index, index, index, utc_now(), name, f"DEMO-{index:03}", f"Route {index}"))
+                           (index, index, index, utc_now(), name, f"VEH-{index:03}", f"Route {index}"))
 
     def save_entity(self, kind, values):
         columns = {"drivers": ("name", "license", "phone"), "vehicles": ("registration", "model"),
