@@ -1,5 +1,5 @@
 
-"""Create a local lab CA and an HTTPS certificate for the driver's LAN IPv4 address."""
+"""Create a local lab CA and HTTPS certificate for a driver's LAN IPv4 address."""
 
 import argparse
 import ipaddress
@@ -15,8 +15,11 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 
+CA_NAME = "Fleet Guardian Lab GPS CA"
+
+
 def validate_lan_ip(value, parser):
-    """Accept a private, usable LAN IPv4 address."""
+    """Accept a usable private LAN IPv4 address."""
 
     try:
         address = ipaddress.ip_address(value)
@@ -40,189 +43,150 @@ def validate_lan_ip(value, parser):
     return address
 
 
+def _create_certificate(
+    subject,
+    issuer,
+    public_key,
+    signing_key,
+    now,
+    days,
+    is_ca,
+    address=None,
+):
+    """Build and sign a CA or HTTPS server certificate."""
+
+    builder = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(public_key)
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=5))
+        .not_valid_after(now + timedelta(days=days))
+        .add_extension(
+            x509.BasicConstraints(ca=is_ca, path_length=0 if is_ca else None),
+            critical=True,
+        )
+        .add_extension(
+            x509.SubjectKeyIdentifier.from_public_key(public_key),
+            critical=False,
+        )
+        .add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key(
+                signing_key.public_key()
+            ),
+            critical=False,
+        )
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=not is_ca,
+                content_commitment=False,
+                key_encipherment=not is_ca,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=is_ca,
+                crl_sign=is_ca,
+                encipher_only=None,
+                decipher_only=None,
+            ),
+            critical=True,
+        )
+    )
+
+    if address is not None:
+        builder = (
+            builder
+            .add_extension(
+                x509.SubjectAlternativeName([x509.IPAddress(address)]),
+                critical=False,
+            )
+            .add_extension(
+                x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]),
+                critical=False,
+            )
+        )
+
+    return builder.sign(signing_key, hashes.SHA256())
+
+
 def generate_certificates(address):
-    """Generate a local CA certificate and its HTTPS server certificate."""
+    """Generate a local CA and its HTTPS server certificate."""
+
+    address = ipaddress.ip_address(address)
+
+    if address.version != 4 or not address.is_private or address.is_reserved:
+        raise ValueError("A usable private LAN IPv4 address is required.")
 
     now = datetime.now(timezone.utc)
 
-    # Generate independent CA and server private keys.
     ca_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048,
     )
-
     server_key = rsa.generate_private_key(
         public_exponent=65537,
         key_size=2048,
     )
 
     ca_name = x509.Name([
-        x509.NameAttribute(
-            NameOID.COMMON_NAME,
-            "Fleet Guardian Lab GPS CA",
-        )
+        x509.NameAttribute(NameOID.COMMON_NAME, CA_NAME)
+    ])
+    server_name = x509.Name([
+        x509.NameAttribute(NameOID.COMMON_NAME, str(address))
     ])
 
-    # Create the local certificate authority.
-    ca = (
-        x509.CertificateBuilder()
-        .subject_name(ca_name)
-        .issuer_name(ca_name)
-        .public_key(ca_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=90))
-        .add_extension(
-            x509.BasicConstraints(
-                ca=True,
-                path_length=0,
-            ),
-            critical=True,
-        )
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(
-                ca_key.public_key()
-            ),
-            critical=False,
-        )
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(
-                ca_key.public_key()
-            ),
-            critical=False,
-        )
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=False,
-                content_commitment=False,
-                key_encipherment=False,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=True,
-                crl_sign=True,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .sign(ca_key, hashes.SHA256())
+    ca = _create_certificate(
+        ca_name, ca_name, ca_key.public_key(),
+        ca_key, now, 90, True,
     )
 
-    # Create the HTTPS certificate for the driver's PC.
-    server_name = x509.Name([
-        x509.NameAttribute(
-            NameOID.COMMON_NAME,
-            str(address),
-        )
-    ])
-
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(server_name)
-        .issuer_name(ca_name)
-        .public_key(server_key.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=89))
-        .add_extension(
-            x509.BasicConstraints(
-                ca=False,
-                path_length=None,
-            ),
-            critical=True,
-        )
-        .add_extension(
-            x509.SubjectKeyIdentifier.from_public_key(
-                server_key.public_key()
-            ),
-            critical=False,
-        )
-        .add_extension(
-            x509.AuthorityKeyIdentifier.from_issuer_public_key(
-                ca_key.public_key()
-            ),
-            critical=False,
-        )
-        .add_extension(
-            x509.KeyUsage(
-                digital_signature=True,
-                content_commitment=False,
-                key_encipherment=True,
-                data_encipherment=False,
-                key_agreement=False,
-                key_cert_sign=False,
-                crl_sign=False,
-                encipher_only=False,
-                decipher_only=False,
-            ),
-            critical=True,
-        )
-        .add_extension(
-            x509.SubjectAlternativeName([
-                x509.IPAddress(address)
-            ]),
-            critical=False,
-        )
-        .add_extension(
-            x509.ExtendedKeyUsage([
-                ExtendedKeyUsageOID.SERVER_AUTH
-            ]),
-            critical=False,
-        )
-        .sign(ca_key, hashes.SHA256())
+    cert = _create_certificate(
+        server_name, ca_name, server_key.public_key(),
+        ca_key, now, 89, False, address,
     )
 
     return ca, cert, server_key
 
 
 def write_certificates(output, ca, cert, server_key):
-    """Write certificate files safely without overwriting existing files."""
+    """Write certificates atomically without replacing existing output."""
 
     output = Path(output)
 
     if output.exists():
-        raise FileExistsError(
-            f"Output already exists: {output}. "
-            "Choose a new directory to avoid replacing trusted certificates."
-        )
+        raise FileExistsError(f"Output already exists: {output}")
 
-    parent = output.parent
-    parent.mkdir(parents=True, exist_ok=True)
+    output.parent.mkdir(parents=True, exist_ok=True)
 
     temporary_dir = Path(
-        tempfile.mkdtemp(
-            prefix="fleet-gps-cert-",
-            dir=str(parent),
-        )
+        tempfile.mkdtemp(prefix="fleet-gps-cert-", dir=output.parent)
     )
 
     try:
-        (temporary_dir / "phone-ca.crt").write_bytes(
-            ca.public_bytes(serialization.Encoding.PEM)
-        )
+        files = {
+            "phone-ca.crt": ca.public_bytes(serialization.Encoding.PEM),
+            "server.crt": cert.public_bytes(serialization.Encoding.PEM),
+            "server.key": server_key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ),
+        }
 
-        (temporary_dir / "server.crt").write_bytes(
-            cert.public_bytes(serialization.Encoding.PEM)
-        )
+        for name, content in files.items():
+            path = temporary_dir / name
+            path.write_bytes(content)
 
-        key_path = temporary_dir / "server.key"
+            if name == "server.key":
+                try:
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass
 
-        key_path.write_bytes(
-            server_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            )
-        )
+        # Refuse to replace an existing directory.
+        if output.exists():
+            raise FileExistsError(f"Output already exists: {output}")
 
-        # Restrict private-key permissions where the OS supports chmod.
-        try:
-            os.chmod(key_path, 0o600)
-        except OSError:
-            pass
-
-        # Rename the completed directory into place.
-        # This avoids exposing a partially generated certificate set.
         os.rename(temporary_dir, output)
 
     finally:
@@ -232,12 +196,7 @@ def write_certificates(output, ca, cert, server_key):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-
-    parser.add_argument(
-        "ip",
-        help="Driver PC private LAN IPv4 address",
-    )
-
+    parser.add_argument("ip", help="Driver PC private LAN IPv4 address")
     parser.add_argument(
         "--output",
         type=Path,
@@ -246,25 +205,16 @@ def main():
     )
 
     args = parser.parse_args()
-
     address = validate_lan_ip(args.ip, parser)
 
     if args.output.exists():
         parser.error(
-            "Output already exists; use a new directory "
-            "to avoid replacing trusted certificates."
+            "Output already exists; choose a new directory."
         )
 
     try:
         ca, cert, server_key = generate_certificates(address)
-
-        write_certificates(
-            args.output,
-            ca,
-            cert,
-            server_key,
-        )
-
+        write_certificates(args.output, ca, cert, server_key)
     except (OSError, ValueError) as error:
         parser.error(f"Certificate generation failed: {error}")
 

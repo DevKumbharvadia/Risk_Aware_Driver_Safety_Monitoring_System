@@ -5,3 +5,5 @@ data/
 .pytest_cache/
 build/
 dist/
+show_structure.py
+reorganize_project.py

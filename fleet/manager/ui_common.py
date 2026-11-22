@@ -17,48 +17,78 @@ COLORS = {
 
 OFFLINE_AFTER_SECONDS = 8
 
+VALID_RISK_LEVELS = {
+    "LOW",
+    "CAUTION",
+    "HIGH",
+    "UNKNOWN",
+}
+
 
 def enable_high_dpi():
-    """Keep Windows display coordinates and Tk window sizes consistent."""
-    if sys.platform == "win32":
+    """Enable Windows high-DPI awareness when supported."""
+
+    if sys.platform != "win32":
+        return
+
+    try:
+        import ctypes
+
         try:
-            import ctypes
-            ctypes.windll.shcore.SetProcessDpiAwareness(1)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
         except (AttributeError, OSError):
-            pass
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except (AttributeError, OSError):
+                pass
+
+    except (AttributeError, OSError):
+        pass
 
 
 def setup_style(root):
     """Configure the shared Tkinter theme and widget styles."""
+
     root.configure(bg="#eef2f6")
 
     style = ttk.Style(root)
-    style.theme_use("clam")
 
-    style.configure("TFrame", background="#eef2f6")
+    if "clam" in style.theme_names():
+        style.theme_use("clam")
+
+    style.configure(
+        "TFrame",
+        background="#eef2f6",
+    )
+
     style.configure(
         "TLabel",
         background="#eef2f6",
         foreground="#15283f",
         font=("Segoe UI", 10),
     )
+
     style.configure(
         "Title.TLabel",
         font=("Segoe UI", 23, "bold"),
     )
+
     style.configure(
         "Subtitle.TLabel",
         foreground="#617185",
     )
+
     style.configure(
         "Metric.TLabel",
         font=("Segoe UI", 17, "bold"),
     )
+
     style.configure(
         "TButton",
         font=("Segoe UI", 10),
         padding=(12, 7),
     )
+
     style.configure(
         "Treeview",
         rowheight=31,
@@ -66,11 +96,13 @@ def setup_style(root):
         background="white",
         fieldbackground="white",
     )
+
     style.configure(
         "Treeview.Heading",
         font=("Segoe UI", 10, "bold"),
         padding=7,
     )
+
     style.map(
         "Treeview",
         background=[("selected", "#dbeafe")],
@@ -80,6 +112,7 @@ def setup_style(root):
 
 def make_table(parent, columns, widths=None, height=15):
     """Create a Treeview with vertical and horizontal scrollbars."""
+
     wrapper = ttk.Frame(parent)
     wrapper.pack(fill="both", expand=True, pady=8)
 
@@ -97,6 +130,7 @@ def make_table(parent, columns, widths=None, height=15):
             column,
             text=column.replace("_", " ").title(),
         )
+
         tree.column(
             column,
             width=width,
@@ -108,6 +142,7 @@ def make_table(parent, columns, widths=None, height=15):
         orient="vertical",
         command=tree.yview,
     )
+
     horizontal = ttk.Scrollbar(
         wrapper,
         orient="horizontal",
@@ -134,22 +169,25 @@ def make_table(parent, columns, widths=None, height=15):
 
 def _parse_datetime(value):
     """Parse an ISO timestamp and normalize it to UTC."""
+
     if not isinstance(value, str) or not value.strip():
         return None
 
     try:
-        parsed = datetime.fromisoformat(value)
+        parsed = datetime.fromisoformat(value.strip())
+
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+
+        return parsed.astimezone(timezone.utc)
+
     except (ValueError, TypeError, OverflowError):
         return None
-
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
-
-    return parsed.astimezone(timezone.utc)
 
 
 def local_time(value):
     """Convert an ISO timestamp to the computer's local time."""
+
     if not value:
         return "—"
 
@@ -162,7 +200,8 @@ def local_time(value):
 
 
 def vehicle_status(vehicle):
-    """Determine whether a vehicle is unassigned, offline, or active."""
+    """Return a vehicle's current assignment, connection, or risk status."""
+
     if not isinstance(vehicle, dict):
         return "UNKNOWN"
 
@@ -186,38 +225,75 @@ def vehicle_status(vehicle):
     received_age = (now - received).total_seconds()
 
     if (
-        captured_age > OFFLINE_AFTER_SECONDS
+        captured_age < -5
+        or received_age < -5
+        or captured_age > OFFLINE_AFTER_SECONDS
         or received_age > OFFLINE_AFTER_SECONDS
     ):
         return "OFFLINE"
 
-    return sample.get("level") or "UNKNOWN"
+    level = str(sample.get("level", "UNKNOWN")).upper()
+
+    return level if level in VALID_RISK_LEVELS else "UNKNOWN"
 
 
 def fill_table(tree, rows):
-    """Update values without destroying the current selection or scroll position."""
+    """Update Treeview rows while preserving selection and scroll position."""
+
+    if tree is None:
+        return
+
     wanted = set()
 
-    for index, (row_id, values, tags) in enumerate(rows):
+    for index, entry in enumerate(rows):
+        if not isinstance(entry, (tuple, list)) or len(entry) != 3:
+            continue
+
+        row_id, values, tags = entry
+
+        if row_id is None:
+            continue
+
         row_id = str(row_id)
+
+        if not row_id:
+            continue
+
         wanted.add(row_id)
 
+        values = tuple(values) if values is not None else ()
+        tags = tuple(tags) if tags is not None else ()
+
         if tree.exists(row_id):
-            tree.item(
-                row_id,
-                values=values,
-                tags=tags,
+            current = tree.item(row_id)
+
+            changed = (
+                tuple(current.get("values", ())) != values
+                or tuple(current.get("tags", ())) != tags
             )
+
+            if changed:
+                tree.item(
+                    row_id,
+                    values=values,
+                    tags=tags,
+                )
+
+            # Move only when the row is not already at its target position.
+            children = tree.get_children()
+            current_index = children.index(row_id)
+
+            if current_index != index:
+                tree.move(row_id, "", index)
+
         else:
             tree.insert(
                 "",
-                "end",
+                index,
                 iid=row_id,
                 values=values,
                 tags=tags,
             )
-
-        tree.move(row_id, "", index)
 
     for row_id in tree.get_children():
         if row_id not in wanted:

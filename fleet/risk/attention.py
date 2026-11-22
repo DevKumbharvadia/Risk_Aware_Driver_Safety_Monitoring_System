@@ -1,8 +1,17 @@
 
-"""Speed context for attention warnings. Values are lab defaults to calibrate."""
+"""Speed context for attention warnings. Values are lab defaults."""
 
 import math
 from dataclasses import dataclass
+
+
+def _valid_number(value):
+    """Check for finite numeric values, excluding booleans."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 @dataclass(frozen=True)
@@ -17,7 +26,6 @@ class AttentionPolicy:
     fast_high: float = 6.0
 
     def __post_init__(self):
-        """Reject invalid policy configurations."""
         values = (
             self.manoeuvring_max,
             self.moderate_max,
@@ -29,14 +37,10 @@ class AttentionPolicy:
             self.fast_high,
         )
 
-        for value in values:
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-                or value < 0
-            ):
-                raise ValueError("Attention policy values must be finite and non-negative.")
+        if any(not _valid_number(v) or v < 0 for v in values):
+            raise ValueError(
+                "Attention policy values must be finite and non-negative."
+            )
 
         if self.manoeuvring_max >= self.moderate_max:
             raise ValueError(
@@ -55,7 +59,7 @@ class AttentionPolicy:
 
 
 class SpeedContext:
-    """Hysteresis and dwell time prevent band changes from speed noise."""
+    """Use hysteresis and dwell time to prevent speed-band fluctuations."""
 
     VALID_BANDS = ("manoeuvring", "moderate", "fast")
 
@@ -72,50 +76,54 @@ class SpeedContext:
         """Update the speed band; return True when a transition completes."""
 
         for name, value in (("speed", speed), ("elapsed", elapsed)):
-            if (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or not math.isfinite(value)
-            ):
-                raise ValueError(f"{name} must be a finite number.")
-
-        if speed < 0:
-            raise ValueError("speed cannot be negative.")
-
-        if elapsed < 0:
-            raise ValueError("elapsed cannot be negative.")
+            if not _valid_number(value) or value < 0:
+                raise ValueError(
+                    f"{name} must be a finite non-negative number."
+                )
 
         p = self.policy
 
+        # Establish the initial band immediately.
         if self.band is None:
-            if speed <= p.manoeuvring_max:
-                self.band = "manoeuvring"
-            elif speed <= p.moderate_max:
-                self.band = "moderate"
-            else:
-                self.band = "fast"
-
+            self.band = (
+                "manoeuvring" if speed <= p.manoeuvring_max
+                else "moderate" if speed <= p.moderate_max
+                else "fast"
+            )
             return False
+
+        if self.band not in self.VALID_BANDS:
+            raise ValueError("Invalid internal speed band.")
+
+        low = p.manoeuvring_max
+        high = p.moderate_max
+        margin = p.speed_margin
+
+        # Apply hysteresis when moving between bands.
+        transitions = {
+            "manoeuvring": (
+                (high + margin, "fast"),
+                (low + margin, "moderate"),
+            ),
+            "moderate": (
+                (low - margin, "manoeuvring"),
+                (high + margin, "fast"),
+            ),
+            "fast": (
+                (low - margin, "manoeuvring"),
+                (high - margin, "moderate"),
+            ),
+        }
 
         candidate = self.band
 
-        if self.band == "manoeuvring":
-            if speed > p.moderate_max + p.speed_margin:
-                candidate = "fast"
-            elif speed > p.manoeuvring_max + p.speed_margin:
-                candidate = "moderate"
-
-        elif self.band == "moderate":
-            if speed <= p.manoeuvring_max - p.speed_margin:
-                candidate = "manoeuvring"
-            elif speed > p.moderate_max + p.speed_margin:
-                candidate = "fast"
-
-        else:
-            if speed <= p.manoeuvring_max - p.speed_margin:
-                candidate = "manoeuvring"
-            elif speed <= p.moderate_max - p.speed_margin:
-                candidate = "moderate"
+        for boundary, target in transitions[self.band]:
+            if (
+                (target == "fast" and speed > boundary)
+                or (target != "fast" and speed <= boundary)
+            ):
+                candidate = target
+                break
 
         if candidate == self.band:
             self.pending = None
@@ -134,35 +142,28 @@ class SpeedContext:
         self.band = candidate
         self.pending = None
         self.pending_seconds = 0.0
-
         return True
 
     def thresholds(self):
-        """Return caution and high thresholds for the current speed band."""
+        """Return caution and high thresholds for the current band."""
 
         if self.band == "fast":
-            return (
-                self.policy.fast_caution,
-                self.policy.fast_high,
+            return self.policy.fast_caution, self.policy.fast_high
+
+        if self.band == "moderate":
+            return self.policy.moderate_caution, self.policy.moderate_high
+
+        return None
+
+    def allows_attention_warning(self, speed):
+        """Check whether speed permits attention warnings."""
+
+        if not _valid_number(speed) or speed < 0:
+            raise ValueError(
+                "speed must be a finite non-negative number."
             )
 
         return (
-            self.policy.moderate_caution,
-            self.policy.moderate_high,
-        )
-
-    def allows_attention_warning(self, speed):
-        """Determine whether speed permits attention warnings."""
-
-        if (
-            isinstance(speed, bool)
-            or not isinstance(speed, (int, float))
-            or not math.isfinite(speed)
-            or speed < 0
-        ):
-            raise ValueError("speed must be a finite non-negative number.")
-
-        return (
             speed > self.policy.manoeuvring_max
-            and self.band != "manoeuvring"
+            and self.band in ("moderate", "fast")
         )

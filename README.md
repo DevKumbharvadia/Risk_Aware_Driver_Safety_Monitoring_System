@@ -1,105 +1,289 @@
-# Fleet Guardian
+# Fleet Guardian – Risk-Aware Driver Safety Monitoring System
 
-A risk-aware driver safety monitoring system for a fleet. One **manager PC** runs the owner dashboard and an HTTPS phone sensor terminal. Each vehicle is assigned a private phone link; the driver opens it in Chrome and the phone streams camera, GPS and motion to the manager PC, which runs the trained behavior classifier, the explainable risk rules, and SQLite storage. The owner sees live risk, camera, events and logs.
+Fleet Guardian is a risk-aware driver safety monitoring system designed to monitor driver behaviour and vehicle telemetry through a centralized fleet manager.
 
-The application is launched from `main.py`. Run `run.bat` (it creates the virtual environment and installs `requirements.txt` on first run, then starts the manager) or, from the project folder:
+The system uses a **manager PC** to run the owner dashboard, local fleet server, risk engine, and SQLite database. Each vehicle is assigned an individual phone link. The driver opens this link in a smartphone browser, allowing the phone to provide camera-based behaviour predictions and GPS telemetry.
+
+Camera inference runs directly in the driver's smartphone browser using **MobileNetV3 Small ONNX**. The manager PC receives the predictions and telemetry, validates incoming data, evaluates driving risk, and stores monitoring results.
+
+Each connected phone has its own access token, session ID, risk engine, and camera preview. This keeps vehicle monitoring sessions isolated.
+
+## System Architecture
+
+The system follows a phone-to-manager architecture:
+
+1. **Driver smartphone**
+   - Opens the vehicle-specific monitoring link in a browser.
+   - Captures camera frames.
+   - Runs MobileNetV3 Small ONNX inference locally.
+   - Collects GPS speed and location information.
+   - Sends behaviour predictions and telemetry to the manager PC.
+
+2. **Manager PC**
+   - Hosts the local phone communication service.
+   - Receives and validates incoming predictions and telemetry.
+   - Maintains separate sessions for connected vehicles.
+   - Runs the explainable risk engine.
+   - Stores monitoring samples and events in SQLite.
+   - Displays live monitoring information through the owner dashboard.
+
+3. **Owner dashboard**
+   - Displays fleet and vehicle information.
+   - Shows active monitoring sessions.
+   - Displays individual vehicle camera previews and risk information.
+   - Provides event history and monitoring logs.
+
+## Quick Start
+
+### Requirements
+
+- Windows PC
+- Python and pip
+- Google Chrome on the driver's smartphone
+- Smartphone with a working camera and GPS
+- Internet connection for Cloudflare Quick Tunnel mode
+
+### Installation
+
+The recommended way to launch the application is:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py
+run.bat
 ```
 
-That starts the manager over the trusted LAN. Add `--trip` to expose the phone service over a temporary Cloudflare Quick Tunnel instead, so a phone on mobile data can reach the manager PC without a LAN or certificate setup:
+The batch file creates the virtual environment and installs the dependencies from `requirements.txt` on the first run, then starts the manager application.
+
+Alternatively, create and activate the virtual environment manually:
 
 ```powershell
-.\.venv\Scripts\python.exe main.py --trip
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-Closing the owner window stops the manager. Each vehicle link contains its own access token; the next launch issues fresh links. Live inference and alerts depend on the phone staying connected. The PC helper for trip mode is `tools/cloudflared.exe`; on another PC without the bundled file, install it with `winget install --id Cloudflare.cloudflared -e`.
+Start the application:
 
-The owner interface uses **Tkinter**. The application, HTTP server, database, risk rules and phone terminal use the **Python standard library**; OpenCV, Pillow, MediaPipe, cryptography and CPU PyTorch are the installed dependencies. Camera behavior predictions run locally on the manager PC CPU; no GPU or model download is needed at startup.
+```powershell
+python main.py
+```
 
-## Quick start
+### Run with Cloudflare Quick Tunnel
 
-On a fresh PC, double-click `run.bat` (it creates `.venv` and installs `requirements.txt` on first run, then starts the manager). The manager opens:
+To make the phone monitoring service accessible over mobile data, launch:
 
-- The owner dashboard with three seeded vehicles, drivers, routes and active trips.
-- A **Connect a driver phone** window listing each vehicle with a **Copy phone link** button.
+```powershell
+python main.py --trip
+```
 
-The manager uses `data/fleet.sqlite3`. Closing the owner window stops the manager and phone terminal.
+This starts a temporary Cloudflare Quick Tunnel and provides a public HTTPS URL for connecting driver smartphones.
 
-### Connect a phone (LAN)
+The PC-side helper executable is located at:
 
-1. On first use the manager generates local HTTPS certificates in `data/phone-link-<MANAGER_IP>/`. Copy `phone-ca.crt` to each phone and install it as a trusted CA certificate (Android: Settings → Security → Encryption → Install from storage; iOS: also enable full trust in Certificate Trust Settings).
-2. Copy a vehicle's phone link and open it in Chrome on that vehicle's phone. Tap **Start monitoring** and allow camera and location access.
-3. The phone streams JPEG frames plus GPS and motion; the manager classifies behavior, runs the risk rules, stores the sample and shows the live risk and camera preview in the owner's **Live monitoring** page.
-4. Use **Refresh vehicle list** to add newly created vehicles.
+```text
+tools/cloudflared.exe
+```
 
-Certificates expire after about 90 days. If the manager PC's LAN IP changes, delete the old `phone-link-*` folder so a fresh certificate set is generated.
+If it is not available, install Cloudflare Tunnel using:
 
-### Connect a phone (trip / mobile data)
+```powershell
+winget install --id Cloudflare.cloudflared -e
+```
 
-Run `main.py --trip`. No certificate install is needed; the manager prints a Cloudflare URL. Send each vehicle's link (built from that URL) to its driver and open it in Chrome over mobile data.
+Closing the owner dashboard stops the manager application and its associated services.
 
-## Owner workflow
+## Connecting Driver Smartphones
 
-| Page | Features |
-| --- | --- |
-| Overview | Vehicle and active-trip counts, online count, HIGH/CAUTION/UNKNOWN counts, live fleet rows, recent transitions |
-| Vehicles | Add/edit registration and model; open monitoring |
-| Drivers | Add/edit name, license, contact; current vehicle and risk; open active vehicle |
-| Routes | Add/edit route name, origin and destination |
-| Assignments | Start/change assignments, end a trip, inspect trip history |
-| Live monitoring | Selected vehicle's driver, route, score, reason, measurements, last sample time, camera |
-| Logs & reports | Vehicle/driver/severity/date filters, latest 1,000 matching transitions, CSV export |
+### LAN Mode
 
-A driver cannot have two active trips. Reassigning a vehicle atomically closes the previous trip and creates a new one. Trip records retain the driver, vehicle and route names from assignment time, so later edits do not rewrite history. End a driver's existing trip before assigning that driver to another vehicle. No permanent deletion UI is provided because records support historical logs.
+1. Start the manager using `run.bat` or `python main.py`.
+2. Open the **Connect a driver phone** window.
+3. Select the required vehicle.
+4. Copy its individual phone link.
+5. Open the link in Chrome on the driver's smartphone.
+6. Grant the requested camera and location permissions.
+7. Start monitoring.
 
-## Explainable risk rules
+The smartphone browser performs camera inference and sends predictions and telemetry to the manager PC.
 
-| Evidence while moving | Score contribution |
-| --- | --- |
-| Eyes closed for at least 2 seconds | 75 |
-| Looking away / model turning | Speed-dependent: 45 at caution duration, 75 at high duration |
-| Phone use for at least 2 seconds | 65; becomes 80 after 5 seconds |
-| Yawning for at least 2 seconds | 25 |
-| At least 3 yawning episodes in the last 60 seconds | 35 |
-| Acceleration at or below −4 m/s² | 35 |
+LAN mode uses locally generated HTTPS certificates. Follow the certificate installation instructions provided by the application when connecting through HTTPS on the local network.
 
-Scores sum and cap at 100. LOW is 0–29, CAUTION is 30–69, HIGH is 70–100. A lower level needs three seconds of recovery. Missing face produces UNKNOWN. Speed below 3 km/h suppresses motion-related warnings. The numerical bands are implementation choices to calibrate later, not validated road-safety thresholds.
+### Trip Mode – Mobile Data
 
-### Speed-aware attention warnings
+1. Start the manager using:
 
-`fleet/risk/attention.py` contains the prototype settings for looking away and model-predicted turning:
+   ```powershell
+   python main.py --trip
+   ```
 
-| Speed context | Caution | High risk |
-| --- | --- | --- |
-| Stopped, below 3 km/h | Existing motion-alert suppression | Suppressed |
-| Possible manoeuvring, 3–10 km/h inclusive | Attention warnings suppressed even during prolonged looking around | Suppressed |
-| Moderate speed, above 10 through 30 km/h | After 5 seconds | After 10 seconds |
-| Faster travel, above 30 km/h | After 3 seconds | After 6 seconds |
+2. Wait for Cloudflare Quick Tunnel to establish a connection.
+3. Copy the vehicle-specific phone link.
+4. Share the link with the corresponding driver.
+5. Open it in Chrome using mobile data or another internet connection.
+6. Grant camera and location permissions.
+7. Start monitoring.
 
-At startup the current speed chooses the band. Subsequent changes use a 2 km/h hysteresis margin and require two seconds of consistent observations: leaving manoeuvring requires above 12 km/h, entering it requires at most 8 km/h, entering faster travel requires above 32 km/h, and returning to moderate speed requires at most 28 km/h. Independently of that retained band, an actual reading at or below 10 km/h suppresses attention scoring immediately. Existing warnings still use the normal three-second recovery period.
+No manual local certificate installation is required for the public HTTPS tunnel.
 
-On a confirmed band change, attention duration restarts from zero. Time spent looking around while manoeuvring never carries into a faster-speed alert. Phone use, eye closure, yawning and harsh-deceleration rules are not relaxed by the manoeuvring allowance; the below-3 km/h suppression still applies to them. Speed inputs come from the phone GPS; all thresholds need calibration with real data. Model weights do not change for this feature.
+Each vehicle receives its own access token and monitoring session. New links are generated when the manager starts again.
 
-## Trained model
+## Owner Dashboard
 
-The exported MobileNetV3 Small classifier is installed at `models/driver_behavior/driver_behavior.pth` (metadata and Colab test report are beside it). It runs on the manager PC CPU. The classifier uses the whole frame; it does not provide bounding boxes, face-presence checks, eye closure or yawning measurements. Its risk mapping is:
+The owner interface is built using **Tkinter**.
 
-| Model output | Application behavior |
-| --- | --- |
-| Talking/texting phone, score at least 0.65 | Phone-duration rules: caution after 2 seconds, high after 5 |
-| Turning, score at least 0.65 | Speed-dependent attention rules above; low-speed manoeuvring allowance |
-| Safe driving, score at least 0.65 | No modeled behavior flag; this does not certify driver safety |
-| Other activities | UNKNOWN because this label mixes unrelated behaviors |
-| Score below 0.65, missing model/camera, or stale frame | UNKNOWN; no fallback to invented readings |
+| Section | Functionality |
+|---|---|
+| Overview | Fleet status, vehicle information, online status, risk levels and recent activity |
+| Vehicles | Vehicle management and monitoring access |
+| Drivers | Driver information and vehicle associations |
+| Routes | Route management |
+| Assignments | Vehicle-driver assignments and trip management |
+| Live Monitoring | Individual vehicle monitoring, camera preview, risk score and telemetry |
+| Logs & Reports | Monitoring history, risk events, filtering and CSV export |
 
-The score is not a calibrated probability of correctness; the 0.65 cutoff needs calibration on separate validation footage. Predictions expire after 2.5 seconds without a fresh frame. Phone-use predictions also require a visible handset in the same frame (TorchVision SSDLite320); without one the result is `unconfirmed_activity` (UNKNOWN) rather than a phone warning. The browser-phone manager also runs Google's Face Landmarker on the manager PC for eye-blink and head-direction cues that feed the eye-closure and looking-aside rules.
+The owner dashboard communicates with the fleet server rather than accessing SQLite directly.
 
-The supplied Colab report records **91.25% test accuracy** and **0.9094 macro-F1** on 1,097 test images, using a provisional image-level split with no established driver/session independence. These are supplied dataset results, not live webcam performance. See [docs/MODEL_INTEGRATION.md](docs/MODEL_INTEGRATION.md) for exact preprocessing and limitations.
+## Camera-Based Driver Behaviour Monitoring
 
-## Operation
+Camera processing takes place inside the driver's smartphone browser.
 
-`main.py` runs the manager. Use `--trip` to reach phones over mobile data instead of the trusted LAN. Owner and device access tokens are generated in `data/config.json`; the owner console uses the owner token, and each phone link carries its own per-vehicle token. The prototype uses HTTP and is intended for localhost or a trusted lab LAN, not public Internet deployment; per-device identity and TLS belong in a later phase. The manager and phone clocks should be synchronized, because timestamps determine trip membership and stale telemetry.
+The system uses **MobileNetV3 Small ONNX** for browser-side behaviour classification.
 
-This is a desktop lab prototype. GPS maps, genuine IMU calibration, dedicated drowsiness detection and validation with live driving footage remain future work.
+The browser sends the resulting predictions to the manager PC instead of transmitting camera inference workloads for server-side classification.
+
+The manager PC processes the received predictions through the risk engine and associates them with the corresponding vehicle and monitoring session.
+
+Camera previews are maintained separately for individual vehicle sessions.
+
+Predictions are validated before being used for risk assessment. Missing, invalid, or stale predictions must not be treated as confirmed driver behaviour.
+
+## GPS Speed and Telemetry
+
+The driver's smartphone provides GPS-based speed information.
+
+The manager PC validates incoming telemetry before using it in the risk engine.
+
+The phone communication layer applies validation limits, including:
+
+- Maximum accepted speed: 250 km/h.
+- Maximum GPS reading age: 5 seconds.
+- Maximum accepted future timestamp: 2 seconds.
+- Maximum GPS accuracy threshold: 30 metres.
+
+Invalid, stale, or excessively inaccurate GPS readings are rejected.
+
+Speed information is used as contextual input for risk assessment and speed-aware attention monitoring.
+
+GPS speed is not a replacement for calibrated vehicle instrumentation.
+
+## Explainable Risk Assessment
+
+The manager PC runs the explainable risk engine.
+
+Instead of relying exclusively on a machine-learning classification score, the risk engine evaluates incoming behaviour predictions and telemetry using temporal rules.
+
+The engine maintains separate monitoring state for individual vehicle sessions.
+
+Risk assessment considers:
+
+- Driver behaviour predictions.
+- Duration of detected behaviour.
+- GPS speed context.
+- Changes in monitoring conditions.
+- Validity and freshness of incoming information.
+
+Risk results include a score, risk level, and explanatory information describing the contributing evidence.
+
+The system is a prototype monitoring solution. Its risk thresholds require further calibration and validation using real driving data.
+
+## Session Isolation
+
+Each connected vehicle has an independent monitoring session.
+
+Session management includes:
+
+- Individual vehicle access tokens.
+- Unique session IDs.
+- Separate risk-engine state.
+- Individual camera previews.
+- Independent telemetry and prediction handling.
+
+This prevents predictions, camera previews, and risk information from being unintentionally shared between vehicles.
+
+The manager validates the incoming session information before associating data with a vehicle.
+
+## Local Fleet Server and Database
+
+The fleet server provides communication between the driver smartphones and the manager application.
+
+The architecture separates server communication and database operations from the owner interface.
+
+SQLite is used for persistent fleet and monitoring data.
+
+The main database is:
+
+```text
+data/fleet.sqlite3
+```
+
+Application configuration is maintained in the project's configuration files.
+
+The database stores fleet information and monitoring records so that historical information can be accessed through the owner dashboard.
+
+## Project Structure
+
+The project separates application configuration, data, fleet communication, risk assessment, and supporting utilities.
+
+Important project components include:
+
+| Component | Responsibility |
+|---|---|
+| `main.py` | Application entry point |
+| `config/` | Application configuration |
+| `data/` | Database and runtime data |
+| `fleet/` | Fleet management, phone communication and server functionality |
+| `fleet/risk/` | Explainable risk assessment and attention rules |
+| `tools/` | Supporting utilities, including Cloudflare Tunnel executable |
+| `models/` | Machine-learning model assets |
+| `requirements.txt` | Python dependencies |
+| `run.bat` | Windows startup script |
+
+The phone-side ONNX model and its browser assets are used by the smartphone monitoring interface.
+
+## Security and Limitations
+
+Fleet Guardian is a desktop research and development prototype.
+
+Important considerations:
+
+- Each vehicle uses an individual phone access token.
+- Monitoring sessions use separate session identifiers.
+- The phone communication service listens on localhost.
+- Cloudflare Quick Tunnel provides temporary public HTTPS access in trip mode.
+- Incoming telemetry and predictions are validated.
+- Camera inference is performed on the smartphone rather than the manager PC.
+
+The application is not yet intended for unrestricted production or public fleet deployment.
+
+Additional authentication hardening, deployment security, real-world model validation, and operational testing are required before production use.
+
+## Current Development Scope
+
+The current implementation focuses on:
+
+- Smartphone-based camera monitoring.
+- MobileNetV3 Small ONNX browser inference.
+- GPS-based speed extraction.
+- Individual vehicle monitoring sessions.
+- Explainable temporal risk assessment.
+- Speed-aware attention monitoring.
+- Centralized fleet management.
+- SQLite-based monitoring records.
+- LAN and Cloudflare Quick Tunnel connectivity.
+
+Future improvements may include GPS route visualization, calibrated vehicle motion sensing, improved driver behaviour models, and validation using real-world driving footage.
+
+## Disclaimer
+
+Fleet Guardian is an experimental driver-monitoring and risk-assessment system.
+
+Its predictions and risk scores are not guaranteed to identify every unsafe driving behaviour. It must not be treated as a certified safety system or as a substitute for responsible driving.

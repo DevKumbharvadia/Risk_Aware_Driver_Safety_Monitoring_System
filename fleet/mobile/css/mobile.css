@@ -1,0 +1,313 @@
+
+:root {
+    color-scheme: dark;
+    --bg: #0b1216;
+    --surface: #141f25;
+    --border: #2c3d45;
+    --text: #f3f7f5;
+    --muted: #9eafb4;
+    --accent: #c4f477;
+    --green: #62df91;
+    --yellow: #ffd078;
+    --red: #ff8177;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    width: min(100% - 32px, 520px);
+    margin: 0 auto;
+    padding: 22px 0 30px;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 system-ui, sans-serif;
+}
+
+header,
+.bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+}
+
+header {
+    padding: 4px 2px 18px;
+    border-bottom: 1px solid var(--border);
+}
+
+header b {
+    color: var(--accent);
+}
+
+#connection {
+    padding: 5px 10px;
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    color: var(--muted);
+    background: var(--surface);
+}
+
+h1 {
+    margin: 25px 0 3px;
+    font-size: clamp(2rem, 8vw, 2.7rem);
+    line-height: 1.12;
+}
+
+#trip {
+    color: var(--muted);
+    margin: 7px 0 22px;
+}
+
+.metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    padding: 20px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: #17262d;
+}
+
+.metrics > div + div {
+    padding-left: 20px;
+    border-left: 1px solid var(--border);
+}
+
+.label {
+    display: block;
+    color: var(--muted);
+    font-size: .78rem;
+    font-weight: 650;
+    text-transform: uppercase;
+}
+
+.value {
+    display: block;
+    margin-top: 8px;
+    font-size: 1.8rem;
+}
+
+.value small {
+    color: var(--muted);
+    font-size: .75rem;
+}
+
+#risk[data-level="LOW"] {
+    color: var(--green);
+}
+
+#risk[data-level="CAUTION"] {
+    color: var(--yellow);
+}
+
+#risk[data-level="HIGH"] {
+    color: var(--red);
+}
+
+#risk[data-level="UNKNOWN"] {
+    color: var(--muted);
+}
+
+output {
+    display: flex;
+    align-items: center;
+    min-height: 58px;
+    margin: 13px 0 18px;
+    padding: 13px 15px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+    overflow-wrap: anywhere;
+}
+
+#modelPrediction {
+    color: var(--muted);
+    font-size: .82rem;
+}
+
+details,
+.feed {
+    margin-bottom: 18px;
+    border: 1px solid var(--border);
+    border-radius: 15px;
+    background: var(--surface);
+}
+
+details {
+    padding: 12px 14px;
+}
+
+summary {
+    cursor: pointer;
+    font-weight: 650;
+}
+
+#sensorDetails {
+    display: block;
+    margin-top: 10px;
+    line-height: 1.8;
+}
+
+.feed {
+    overflow: hidden;
+    background: #050a0d;
+}
+
+.bar {
+    padding: 13px 16px;
+    background: #1b2a31;
+}
+
+.bar span {
+    color: var(--muted);
+    font-size: .8rem;
+}
+
+video {
+    display: block;
+    width: 100%;
+    height: clamp(210px, 38vh, 340px);
+    object-fit: contain;
+}
+
+footer {
+    display: flex;
+    gap: 10px;
+    margin-top: 18px;
+}
+
+button {
+    min-height: 49px;
+    padding: 12px 17px;
+    border: 1px solid #40535b;
+    border-radius: 13px;
+    background: #1b2a31;
+    color: var(--text);
+    font: inherit;
+    font-weight: 680;
+}
+
+button:disabled {
+    opacity: .45;
+}
+
+#start {
+    flex: 1;
+    border-color: transparent;
+    background: var(--accent);
+    color: #17230c;
+}
+
+#mountNote {
+    color: var(--muted);
+    font-size: .78rem;
+}
+
+/* Speed simulator */
+
+.speed-test {
+    margin: 16px 0;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+}
+
+.speed-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+
+.mode-badge {
+    padding: 4px 9px;
+    border-radius: 20px;
+    font-size: .7rem;
+    font-weight: 700;
+    background: #263840;
+    color: var(--muted);
+}
+
+.mode-badge[data-mode="manual"] {
+    background: #493b1e;
+    color: var(--yellow);
+}
+
+.speed-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.speed-row input {
+    min-width: 0;
+    width: 100%;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: #0b1216;
+    color: var(--text);
+    font: inherit;
+}
+
+#applySpeed {
+    background: var(--accent);
+    color: #17230c;
+    border-color: transparent;
+}
+
+#speedSlider {
+    width: 100%;
+    margin: 18px 0 6px;
+    accent-color: var(--accent);
+}
+
+.speed-scale {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: .72rem;
+    color: var(--muted);
+}
+
+#speedDisplay {
+    color: var(--accent);
+    font-size: 1rem;
+}
+
+.speed-test[data-active="true"] {
+    border-color: #8f763c;
+}
+
+#speedModeButton {
+    width: 100%;
+    margin-top: 14px;
+}
+
+#speedTestNote {
+    display: block;
+    color: var(--muted);
+    margin-top: 9px;
+}
+
+@media(max-width: 380px) {
+    body {
+        width: min(100% - 24px, 520px);
+        padding-top: 15px;
+    }
+
+    .metrics {
+        padding: 16px;
+    }
+
+    .metrics > div + div {
+        padding-left: 13px;
+    }
+
+    .value {
+        font-size: 1.55rem;
+    }
+}

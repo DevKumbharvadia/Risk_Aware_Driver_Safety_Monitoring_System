@@ -3,7 +3,7 @@
 
 from contextlib import contextmanager
 from pathlib import Path
-from queue import Empty, Queue
+from queue import Empty, Full, Queue
 import re
 import shutil
 import subprocess
@@ -12,11 +12,89 @@ import threading
 
 TUNNEL_START_TIMEOUT = 65
 PROCESS_STOP_TIMEOUT = 5
+READER_STOP_TIMEOUT = 2
 
 TUNNEL_URL_PATTERN = re.compile(
     r"https://[a-z0-9-]+\.trycloudflare\.com\b",
     re.IGNORECASE,
 )
+
+
+def _find_cloudflared():
+    """Find the bundled or installed cloudflared executable."""
+
+    bundled = (
+        Path(__file__).resolve().parents[2]
+        / "tools"
+        / "cloudflared.exe"
+    )
+
+    return str(bundled) if bundled.is_file() else shutil.which("cloudflared")
+
+
+def _read_output(process, ready):
+    """Monitor cloudflared output until startup succeeds or fails."""
+
+    url = None
+    registered = False
+    last_error = ""
+
+    def notify(result):
+        try:
+            ready.put_nowait(result)
+        except Full:
+            pass
+
+    try:
+        if process.stdout is None:
+            notify((None, "Could not read cloudflared output."))
+            return
+
+        for line in process.stdout:
+            match = TUNNEL_URL_PATTERN.search(line)
+
+            if match:
+                url = match.group(0)
+
+            if "Registered tunnel connection" in line:
+                registered = True
+
+            if url and registered:
+                notify((url, None))
+                return
+
+            if "ERR" in line.upper():
+                last_error = line.strip()
+
+    except (OSError, ValueError) as error:
+        last_error = str(error)
+
+    notify((
+        None,
+        last_error or "cloudflared exited before the tunnel was ready.",
+    ))
+
+
+def _stop_process(process, reader):
+    """Stop cloudflared and release its output resources."""
+
+    if process.poll() is None:
+        process.terminate()
+
+        try:
+            process.wait(timeout=PROCESS_STOP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    if reader.ident is not None:
+        reader.join(timeout=READER_STOP_TIMEOUT)
+
+    if process.stdout is not None:
+        try:
+            process.stdout.close()
+        except OSError:
+            pass
 
 
 @contextmanager
@@ -30,19 +108,7 @@ def trip_proxy(port):
     ):
         raise ValueError("Port must be an integer between 1 and 65535.")
 
-    # cloudflare.py is in <project>/fleet/tunnel.
-    # The bundled helper is in <project>/tools/cloudflared.exe.
-    bundled = (
-        Path(__file__).resolve().parents[2]
-        / "tools"
-        / "cloudflared.exe"
-    )
-
-    cli = (
-        str(bundled)
-        if bundled.is_file()
-        else shutil.which("cloudflared")
-    )
+    cli = _find_cloudflared()
 
     if not cli:
         raise SystemExit(
@@ -63,6 +129,7 @@ def trip_proxy(port):
     try:
         process = subprocess.Popen(
             command,
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -70,7 +137,6 @@ def trip_proxy(port):
             errors="replace",
             bufsize=1,
         )
-
     except OSError as error:
         raise SystemExit(
             f"Could not launch cloudflared: {error}"
@@ -78,76 +144,23 @@ def trip_proxy(port):
 
     ready = Queue(maxsize=1)
 
-    def notify(result):
-        """Send only the first startup result."""
-        try:
-            ready.put_nowait(result)
-        except Exception:
-            pass
-
-    def read_output():
-        url = None
-        registered = False
-        notified = False
-        last_error = ""
-
-        try:
-            if process.stdout is None:
-                notify((
-                    None,
-                    "Could not read cloudflared output.",
-                ))
-                return
-
-            for line in process.stdout:
-                match = TUNNEL_URL_PATTERN.search(line)
-
-                if match:
-                    url = match.group(0)
-
-                if "Registered tunnel connection" in line:
-                    registered = True
-
-                if url and registered and not notified:
-                    notify((url, None))
-                    notified = True
-
-                if "ERR" in line.upper():
-                    last_error = line.strip()
-
-        except (OSError, ValueError) as error:
-            last_error = str(error)
-
-        finally:
-            if not notified:
-                notify((
-                    None,
-                    last_error
-                    or "cloudflared exited before the tunnel was ready.",
-                ))
-
     reader = threading.Thread(
-        target=read_output,
+        target=_read_output,
+        args=(process, ready),
         name="cloudflared-output",
         daemon=True,
     )
 
-    reader.start()
-
     try:
-        print(
-            "Starting Cloudflare Quick Tunnel…",
-            flush=True,
-        )
+        reader.start()
+
+        print("Starting Cloudflare Quick Tunnel…", flush=True)
 
         try:
-            url, error = ready.get(
-                timeout=TUNNEL_START_TIMEOUT
-            )
-
+            url, error = ready.get(timeout=TUNNEL_START_TIMEOUT)
         except Empty:
             raise SystemExit(
-                "Cloudflare tunnel startup timed out after "
+                f"Cloudflare tunnel startup timed out after "
                 f"{TUNNEL_START_TIMEOUT} seconds. "
                 "Check internet access, firewall rules and "
                 "outbound connectivity."
@@ -166,17 +179,4 @@ def trip_proxy(port):
         yield url
 
     finally:
-        if process.poll() is None:
-            process.terminate()
-
-            try:
-                process.wait(timeout=PROCESS_STOP_TIMEOUT)
-
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-
-        reader.join(timeout=2)
-
-        if process.stdout:
-            process.stdout.close()
+        _stop_process(process, reader)

@@ -1,5 +1,5 @@
 
-"""SQLite persistence. Each operation owns its connection (safe across threads)."""
+"""SQLite persistence. Each operation owns its connection."""
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -14,12 +14,39 @@ ENTITY_FIELDS = {
     "routes": ("name", "origin", "destination"),
 }
 
+ENTITY_LABELS = {
+    "drivers": "driver",
+    "vehicles": "vehicle",
+    "routes": "route",
+}
+
 
 def utc_now():
+    """Return the current UTC time as an ISO timestamp."""
+
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
+def positive_id(value, label="record"):
+    """Convert a value into a valid positive database ID."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {label} ID.")
+
+    try:
+        result = int(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"Invalid {label} ID.") from None
+
+    if result <= 0:
+        raise ValueError(f"Invalid {label} ID.")
+
+    return result
+
+
 class Store:
+    """Thread-safe SQLite storage for fleet and risk data."""
+
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -99,10 +126,9 @@ class Store:
 
     @contextmanager
     def connection(self):
-        db = sqlite3.connect(
-            self.path,
-            timeout=10,
-        )
+        """Create and safely close an independent SQLite connection."""
+
+        db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
 
         try:
@@ -111,39 +137,32 @@ class Store:
 
             with db:
                 yield db
-
         finally:
             db.close()
 
-    # ---------------------------------------------------------
     # Initial data
-    # ---------------------------------------------------------
 
     def seed(self):
-        """Insert demonstration records only into an empty database."""
+        """Insert demonstration records into an empty database."""
+
+        drivers = (
+            ("Aarav Shah", "LIC-001", "Contact"),
+            ("Meera Patel", "LIC-002", "Contact"),
+            ("Kabir Desai", "LIC-003", "Contact"),
+        )
+
+        destinations = ("Campus", "Station", "Warehouse")
+
         with self.connection() as db:
-            counts = {
-                table: db.execute(
+            counts = [
+                db.execute(
                     f"SELECT COUNT(*) FROM {table}"
                 ).fetchone()[0]
                 for table in ("vehicles", "drivers", "routes")
-            }
+            ]
 
-            # Do not partially seed an existing database.
-            if any(counts.values()):
+            if any(counts):
                 return
-
-            drivers = (
-                ("Aarav Shah", "LIC-001", "Contact"),
-                ("Meera Patel", "LIC-002", "Contact"),
-                ("Kabir Desai", "LIC-003", "Contact"),
-            )
-
-            destinations = (
-                "Campus",
-                "Station",
-                "Warehouse",
-            )
 
             for index, (name, license_number, phone) in enumerate(
                 drivers,
@@ -173,19 +192,14 @@ class Store:
                     INSERT INTO routes(name, origin, destination)
                     VALUES (?, ?, ?)
                     """,
-                    (route, "Depot", destinations[index - 1]),
+                    ("Route " + str(index), "Depot", destinations[index - 1]),
                 )
 
                 db.execute(
                     """
                     INSERT INTO trips(
-                        vehicle_id,
-                        driver_id,
-                        route_id,
-                        started_at,
-                        driver_name,
-                        vehicle_name,
-                        route_name
+                        vehicle_id, driver_id, route_id,
+                        started_at, driver_name, vehicle_name, route_name
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -200,11 +214,11 @@ class Store:
                     ),
                 )
 
-    # ---------------------------------------------------------
     # Entity management
-    # ---------------------------------------------------------
 
     def save_entity(self, kind, values):
+        """Create or update a driver, vehicle, or route."""
+
         if kind not in ENTITY_FIELDS:
             raise ValueError("Unknown record type.")
 
@@ -218,9 +232,7 @@ class Store:
             value = values.get(field, "")
 
             if not isinstance(value, str):
-                raise ValueError(
-                    f"Enter a valid {field}."
-                )
+                raise ValueError(f"Enter a valid {field}.")
 
             value = value.strip()
 
@@ -230,9 +242,8 @@ class Store:
                 )
 
             if not value and field != "phone":
-                raise ValueError(
-                    f"{field.replace('_', ' ').title()} is required."
-                )
+                label = field.replace("_", " ").title()
+                raise ValueError(f"{label} is required.")
 
             cleaned.append(value)
 
@@ -240,16 +251,10 @@ class Store:
 
         with self.connection() as db:
             if record_id is not None:
-                if isinstance(record_id, bool):
-                    raise ValueError("Invalid record ID.")
-
-                try:
-                    record_id = int(record_id)
-                except (TypeError, ValueError):
-                    raise ValueError("Invalid record ID.")
-
-                if record_id <= 0:
-                    raise ValueError("Invalid record ID.")
+                record_id = positive_id(
+                    record_id,
+                    ENTITY_LABELS[kind],
+                )
 
                 assignments = ", ".join(
                     f"{field}=?" for field in fields
@@ -278,19 +283,12 @@ class Store:
             return cursor.lastrowid
 
     def delete_entity(self, kind, record_id):
+        """Delete an entity only when it has no trip history."""
+
         if kind not in ENTITY_FIELDS:
             raise ValueError("Unknown record type.")
 
-        if isinstance(record_id, bool):
-            raise ValueError("Invalid record ID.")
-
-        try:
-            record_id = int(record_id)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid record ID.")
-
-        if record_id <= 0:
-            raise ValueError("Invalid record ID.")
+        record_id = positive_id(record_id, ENTITY_LABELS[kind])
 
         reference = {
             "drivers": "driver_id",
@@ -301,8 +299,7 @@ class Store:
         with self.connection() as db:
             used = db.execute(
                 f"""
-                SELECT 1
-                FROM trips
+                SELECT 1 FROM trips
                 WHERE {reference}=?
                 LIMIT 1
                 """,
@@ -323,20 +320,14 @@ class Store:
             if not cursor.rowcount:
                 raise ValueError("Record does not exist.")
 
-    # ---------------------------------------------------------
     # Trip management
-    # ---------------------------------------------------------
 
     def assign(self, vehicle_id, driver_id, route_id):
-        try:
-            vehicle_id = int(vehicle_id)
-            driver_id = int(driver_id)
-            route_id = int(route_id)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid vehicle, driver, or route ID.")
+        """End the vehicle's previous trip and create a new assignment."""
 
-        if min(vehicle_id, driver_id, route_id) <= 0:
-            raise ValueError("Invalid vehicle, driver, or route ID.")
+        vehicle_id = positive_id(vehicle_id, "vehicle")
+        driver_id = positive_id(driver_id, "driver")
+        route_id = positive_id(route_id, "route")
 
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -363,8 +354,7 @@ class Store:
 
             busy = db.execute(
                 """
-                SELECT vehicle_id
-                FROM trips
+                SELECT vehicle_id FROM trips
                 WHERE driver_id=? AND ended_at IS NULL
                 """,
                 (driver_id,),
@@ -380,8 +370,7 @@ class Store:
 
             db.execute(
                 """
-                UPDATE trips
-                SET ended_at=?
+                UPDATE trips SET ended_at=?
                 WHERE vehicle_id=? AND ended_at IS NULL
                 """,
                 (now, vehicle_id),
@@ -390,13 +379,8 @@ class Store:
             cursor = db.execute(
                 """
                 INSERT INTO trips(
-                    vehicle_id,
-                    driver_id,
-                    route_id,
-                    started_at,
-                    driver_name,
-                    vehicle_name,
-                    route_name
+                    vehicle_id, driver_id, route_id,
+                    started_at, driver_name, vehicle_name, route_name
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -414,22 +398,14 @@ class Store:
             return cursor.lastrowid
 
     def end_trip(self, trip_id):
-        if isinstance(trip_id, bool):
-            raise ValueError("Invalid trip ID.")
+        """End an active trip."""
 
-        try:
-            trip_id = int(trip_id)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid trip ID.")
-
-        if trip_id <= 0:
-            raise ValueError("Invalid trip ID.")
+        trip_id = positive_id(trip_id, "trip")
 
         with self.connection() as db:
             cursor = db.execute(
                 """
-                UPDATE trips
-                SET ended_at=?
+                UPDATE trips SET ended_at=?
                 WHERE id=? AND ended_at IS NULL
                 """,
                 (utc_now(), trip_id),
@@ -441,11 +417,14 @@ class Store:
                 )
 
     def assignment(self, vehicle_id):
+        """Return a vehicle's active trip."""
+
+        vehicle_id = positive_id(vehicle_id, "vehicle")
+
         with self.connection() as db:
             row = db.execute(
                 """
-                SELECT *
-                FROM trips
+                SELECT * FROM trips
                 WHERE vehicle_id=? AND ended_at IS NULL
                 """,
                 (vehicle_id,),
@@ -453,11 +432,11 @@ class Store:
 
             return dict(row) if row else None
 
-    # ---------------------------------------------------------
     # Risk data
-    # ---------------------------------------------------------
 
     def add_sample(self, sample):
+        """Store a risk sample and create a transition event when needed."""
+
         if not isinstance(sample, dict):
             raise ValueError("Invalid sample data.")
 
@@ -473,35 +452,53 @@ class Store:
         if any(key not in sample for key in required):
             raise ValueError("Sample is missing required fields.")
 
-        if not isinstance(sample["id"], str) or not sample["id"].strip():
+        sample_id = sample["id"]
+
+        if not isinstance(sample_id, str) or not sample_id.strip():
             raise ValueError("Invalid sample ID.")
 
-        if not isinstance(sample["risk"], dict):
+        risk = sample["risk"]
+        readings = sample["readings"]
+
+        if not isinstance(risk, dict):
             raise ValueError("Invalid risk assessment.")
 
-        if not isinstance(sample["readings"], dict):
+        if not isinstance(readings, dict):
             raise ValueError("Invalid sensor readings.")
 
-        result = sample["risk"]
-
         try:
-            trip_id = int(sample["trip_id"])
-            vehicle_id = int(sample["vehicle_id"])
-            score = int(result["score"])
-            level = str(result["level"])
-            reason = str(result["reason"])
-            captured_at = str(sample["captured_at"])
+            trip_id = positive_id(sample["trip_id"], "trip")
+            vehicle_id = positive_id(sample["vehicle_id"], "vehicle")
 
-            readings_json = json.dumps(sample["readings"])
+            score_value = risk["score"]
 
-        except (KeyError, TypeError, ValueError, OverflowError):
-            raise ValueError("Invalid sample or risk assessment values.")
+            if isinstance(score_value, bool):
+                raise ValueError("Invalid risk score.")
 
-        if trip_id <= 0 or vehicle_id <= 0:
-            raise ValueError("Invalid trip or vehicle ID.")
+            score = int(score_value)
 
-        if not captured_at:
-            raise ValueError("Missing sample timestamp.")
+            if score < 0:
+                raise ValueError("Invalid risk score.")
+
+            level = risk["level"]
+            reason = risk["reason"]
+            captured_at = sample["captured_at"]
+
+            if not isinstance(level, str) or not level.strip():
+                raise ValueError("Invalid risk level.")
+
+            if not isinstance(reason, str):
+                raise ValueError("Invalid risk reason.")
+
+            if not isinstance(captured_at, str) or not captured_at.strip():
+                raise ValueError("Invalid sample timestamp.")
+
+            readings_json = json.dumps(readings, allow_nan=False)
+
+        except (KeyError, TypeError, ValueError, OverflowError) as error:
+            raise ValueError(
+                "Invalid sample or risk assessment values."
+            ) from error
 
         with self.connection() as db:
             db.execute("BEGIN IMMEDIATE")
@@ -530,8 +527,7 @@ class Store:
 
             previous = db.execute(
                 """
-                SELECT *
-                FROM samples
+                SELECT * FROM samples
                 WHERE trip_id=?
                 ORDER BY captured_at DESC, received_at DESC
                 LIMIT 1
@@ -542,19 +538,13 @@ class Store:
             cursor = db.execute(
                 """
                 INSERT OR IGNORE INTO samples(
-                    id,
-                    trip_id,
-                    captured_at,
-                    received_at,
-                    score,
-                    level,
-                    reason,
-                    readings
+                    id, trip_id, captured_at, received_at,
+                    score, level, reason, readings
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    sample["id"],
+                    sample_id,
                     trip_id,
                     captured_at,
                     utc_now(),
@@ -565,35 +555,30 @@ class Store:
                 ),
             )
 
-            # Ignore duplicate samples.
             if not cursor.rowcount:
                 return
 
-            # Only create a risk transition event when this sample
-            # is newer than the previous sample.
             is_newest = (
                 previous is None
                 or captured_at > previous["captured_at"]
             )
 
-            if is_newest and (
+            changed_level = (
                 previous is None
                 or previous["level"] != level
-            ):
+            )
+
+            if is_newest and changed_level:
                 db.execute(
                     """
                     INSERT INTO events(
-                        sample_id,
-                        trip_id,
-                        captured_at,
-                        level,
-                        score,
-                        reason
+                        sample_id, trip_id, captured_at,
+                        level, score, reason
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
                     (
-                        sample["id"],
+                        sample_id,
                         trip_id,
                         captured_at,
                         level,
@@ -602,11 +587,11 @@ class Store:
                     ),
                 )
 
-    # ---------------------------------------------------------
     # Dashboard data
-    # ---------------------------------------------------------
 
     def snapshot(self):
+        """Return entities, trips, and each active vehicle's latest sample."""
+
         with self.connection() as db:
             result = {
                 table: [
@@ -634,36 +619,36 @@ class Store:
             }
 
             for vehicle in result["vehicles"]:
-                vehicle["trip"] = active.get(vehicle["id"])
+                trip = active.get(vehicle["id"])
+                vehicle["trip"] = trip
                 vehicle["sample"] = None
 
-                if vehicle["trip"]:
-                    row = db.execute(
-                        """
-                        SELECT *
-                        FROM samples
-                        WHERE trip_id=?
-                        ORDER BY captured_at DESC, received_at DESC
-                        LIMIT 1
-                        """,
-                        (vehicle["trip"]["id"],),
-                    ).fetchone()
+                if not trip:
+                    continue
 
-                    if row:
-                        vehicle["sample"] = dict(row)
+                row = db.execute(
+                    """
+                    SELECT * FROM samples
+                    WHERE trip_id=?
+                    ORDER BY captured_at DESC, received_at DESC
+                    LIMIT 1
+                    """,
+                    (trip["id"],),
+                ).fetchone()
 
-                        try:
-                            vehicle["sample"]["readings"] = json.loads(
-                                row["readings"]
-                            )
-                        except (ValueError, TypeError):
-                            vehicle["sample"]["readings"] = {}
+                if row:
+                    sample = dict(row)
+
+                    try:
+                        sample["readings"] = json.loads(row["readings"])
+                    except (ValueError, TypeError):
+                        sample["readings"] = {}
+
+                    vehicle["sample"] = sample
 
             return result
 
-    # ---------------------------------------------------------
     # Risk event logs
-    # ---------------------------------------------------------
 
     def logs(
         self,
@@ -674,10 +659,12 @@ class Store:
         until=None,
         limit=1000,
     ):
+        """Return filtered risk transition events."""
+
         try:
             limit = int(limit)
-        except (TypeError, ValueError):
-            raise ValueError("Invalid log limit.")
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError("Invalid log limit.") from None
 
         limit = max(1, min(limit, 1000))
 
@@ -696,20 +683,21 @@ class Store:
 
         args = []
 
-        for field, value in (
-            ("t.vehicle_id", vehicle_id),
-            ("t.driver_id", driver_id),
-            ("e.level", level),
-        ):
-            if value not in (None, "", "ALL"):
-                if field in ("t.vehicle_id", "t.driver_id"):
-                    try:
-                        value = int(value)
-                    except (TypeError, ValueError):
-                        raise ValueError("Invalid log filter ID.")
+        filters = (
+            ("t.vehicle_id", vehicle_id, "vehicle"),
+            ("t.driver_id", driver_id, "driver"),
+            ("e.level", level, None),
+        )
 
-                sql += f" AND {field}=?"
-                args.append(value)
+        for field, value, label in filters:
+            if value in (None, "", "ALL"):
+                continue
+
+            if label:
+                value = positive_id(value, label)
+
+            sql += f" AND {field}=?"
+            args.append(value)
 
         if since:
             sql += " AND e.captured_at>=?"
