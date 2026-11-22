@@ -13,7 +13,8 @@ const CLASS_NAMES = [
     "turning"
 ];
 
-const SIZE = 224;
+/* Must match the ONNX model input dimensions */
+const SIZE = 256;
 
 /* AI inference remains unchanged */
 

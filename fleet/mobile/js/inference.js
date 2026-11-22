@@ -1,4 +1,6 @@
 
+"use strict";
+
 /* Load ONNX model */
 
 async function loadModel() {
@@ -26,10 +28,7 @@ async function loadModel() {
 
     } catch (error) {
 
-        console.error(
-            "ONNX model loading error:",
-            error
-        );
+        console.error("ONNX model loading error:", error);
 
         throw Error(
             `Could not load ${MODEL_URL}: ${error.message || error}`
@@ -43,11 +42,17 @@ async function loadModel() {
         throw Error("Model input/output metadata is missing.");
     }
 
+    const inputMetadata = session.inputMetadata?.[0];
+
     console.info(
         "ONNX model loaded.",
-        session.inputNames,
-        session.outputNames,
-        CLASS_NAMES
+        {
+            inputs: session.inputNames,
+            outputs: session.outputNames,
+            inputMetadata,
+            expectedSize: SIZE,
+            classes: CLASS_NAMES
+        }
     );
 }
 
@@ -93,9 +98,7 @@ function makeTensor() {
 
     const plane = SIZE * SIZE;
 
-    const values = new Float32Array(
-        3 * plane
-    );
+    const values = new Float32Array(3 * plane);
 
     for (let i = 0; i < plane; i++) {
 
@@ -201,6 +204,7 @@ function decode(output) {
     let best = 0;
 
     for (let i = 1; i < probs.length; i++) {
+
         if (probs[i] > probs[best]) {
             best = i;
         }
@@ -215,15 +219,6 @@ function decode(output) {
         shape
     };
 
-    console.table(
-        probs.map((score, index) => ({
-            index,
-            label: CLASS_NAMES[index],
-            probability: Number(score.toFixed(6)),
-            rawOutput: values[index]
-        }))
-    );
-
     return prediction;
 }
 
@@ -231,7 +226,8 @@ function decode(output) {
 
 async function sendPrediction(
     prediction,
-    inferenceMs
+    inferenceMs,
+    capturedAt
 ) {
 
     const payload = {
@@ -248,7 +244,7 @@ async function sendPrediction(
 
         server_capture: captureTime(),
 
-        captured: Date.now() / 1000,
+        captured: capturedAt,
 
         gps: gpsPayload(),
 
@@ -271,16 +267,13 @@ async function sendPrediction(
         "/prediction",
         {
             method: "POST",
-
             headers: authHeaders(),
-
             body: JSON.stringify(payload),
-
             cache: "no-store"
         }
     );
 
-    const text = await response.text();
+    const responseText = await response.text();
 
     if (
         response.status === 401 ||
@@ -297,27 +290,33 @@ async function sendPrediction(
             "Prediction upload rejected",
             {
                 status: response.status,
-                response: text,
+                response: responseText,
+                captured: capturedAt,
                 payload
             }
         );
 
-        throw Error(
-            `Prediction rejected (${response.status}): ${text.slice(0, 200)}`
+        const error = Error(
+            `Prediction rejected (${response.status}): ${responseText.slice(0, 200)}`
         );
+
+        error.status = response.status;
+        error.responseText = responseText;
+
+        throw error;
     }
 
     let result;
 
     try {
 
-        result = JSON.parse(text);
+        result = JSON.parse(responseText);
 
-    } catch (error) {
+    } catch {
 
         console.error(
             "Invalid server JSON response:",
-            text
+            responseText
         );
 
         throw Error(
@@ -353,11 +352,19 @@ async function predict() {
 
     try {
 
+        /*
+         * Synchronize the clock before capturing the frame.
+         * The capture timestamp must represent the actual
+         * observation time, not the upload completion time.
+         */
+
         await ensureClock();
 
         if (!running) {
             return;
         }
+
+        const capturedAt = Date.now() / 1000;
 
         const started = performance.now();
 
@@ -390,9 +397,29 @@ async function predict() {
 
         showClientPrediction(prediction);
 
+        /*
+         * Discard observations that have already become
+         * too old locally instead of uploading stale data.
+         */
+
+        const ageMs =
+            Date.now() - capturedAt * 1000;
+
+        if (ageMs > 2000) {
+
+            console.warn(
+                "Skipping stale local prediction:",
+                ageMs,
+                "ms"
+            );
+
+            return;
+        }
+
         await sendPrediction(
             prediction,
-            duration
+            duration,
+            capturedAt
         );
 
     } finally {
@@ -419,6 +446,35 @@ async function inferenceLoop() {
             "Inference or upload error:",
             error
         );
+
+        /*
+         * A delayed prediction is not automatically
+         * an authentication or connection failure.
+         */
+
+        if (
+            error.status === 400 &&
+            /delayed prediction/i.test(
+                error.responseText || error.message
+            )
+        ) {
+
+            console.warn(
+                "Manager rejected an outdated observation. Monitoring will continue."
+            );
+
+            status("Skipping delayed prediction. Monitoring continues.");
+
+            if (running) {
+
+                inferenceTimer = setTimeout(
+                    inferenceLoop,
+                    INFERENCE_INTERVAL
+                );
+            }
+
+            return;
+        }
 
         cleanup();
 
