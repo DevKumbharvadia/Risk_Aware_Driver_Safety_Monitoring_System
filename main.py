@@ -1,4 +1,7 @@
-"""Command-line entry point. Run `python main.py` for the phone-camera fleet manager."""
+
+
+# main.py  
+"""Command-line entry point for Fleet Guardian (Cloudflare Quick Tunnel only)."""
 import argparse
 import json
 import logging
@@ -21,17 +24,35 @@ def load_config(path):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Fleet Guardian — phone-camera fleet manager")
-    parser.add_argument("--data-dir", type=Path, default=PROJECT_DIR / "data", help="Data directory for the database, logs and certificates")
-    parser.add_argument("--trip", action="store_true", help="Expose the phone service over a temporary Cloudflare HTTPS tunnel")
+    parser = argparse.ArgumentParser(
+        description="Fleet Guardian — Cloudflare Quick Tunnel fleet manager"
+    )
+    parser.add_argument(
+        "--data-dir",
+        type=Path,
+        default=PROJECT_DIR / "data",
+        help="Data directory for the database, logs and configuration",
+    )
     args = parser.parse_args()
+
     args.data_dir.mkdir(parents=True, exist_ok=True)
     log_file = args.data_dir / "fleet.log"
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s",
-                        handlers=[RotatingFileHandler(log_file, maxBytes=1_000_000, backupCount=2, encoding="utf-8")])
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            RotatingFileHandler(
+                log_file,
+                maxBytes=1_000_000,
+                backupCount=2,
+                encoding="utf-8",
+            )
+        ],
+    )
     config = load_config(args.data_dir / "config.json")
     run_manager(args, config)
 
 
 if __name__ == "__main__":
     main()
+

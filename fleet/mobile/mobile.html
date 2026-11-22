@@ -1,242 +1,788 @@
-<!doctype html>
-<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Fleet Guardian Driver</title>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1216">
+<title>Fleet Guardian</title>
+
 <style>
-*{box-sizing:border-box}html{background:#10191e;color:#f6f8f4;font:16px system-ui,sans-serif;color-scheme:dark}
-body{max-width:34rem;margin:auto;padding:clamp(16px,5vw,30px)}header,.bar,.metrics,footer{display:flex;align-items:center;justify-content:space-between;gap:12px}
-header{border-bottom:1px solid #364349;padding-bottom:14px;font-weight:750}header b{color:#bcf674}small,.label{font-size:.8rem;color:#bdcccf}
-h1{font-size:clamp(1.8rem,7vw,2.7rem);letter-spacing:-.045em;margin:20px 0 4px}#trip{margin:0 0 18px;color:#bdcccf}
-.metrics{align-items:stretch;background:#1d2b31;border-radius:18px;padding:18px;border:1px solid #35454c}.metrics>div{flex:1}.metrics>div+div{border-left:1px solid #47575b;padding-left:18px}
-.value{display:block;font-size:1.65rem;margin-top:3px;font-weight:730}.value small{font-weight:500}
-#risk[data-level=HIGH]{color:#ff9384}#risk[data-level=CAUTION]{color:#ffd179}#risk[data-level=LOW]{color:#bcf674}
-output{display:block;margin:12px 2px 18px;color:#d2dedf;min-height:2.6em;font-size:.95rem}
-.feed{margin:0;border:1px solid #35454c;border-radius:16px;overflow:hidden;background:#081014}
-.bar{padding:10px 14px;background:#1d2b31;font-size:.88rem}.bar span{color:#b7c7cb}
-video{display:block;width:100%;height:clamp(160px,30dvh,290px);object-fit:contain}
-.view{position:relative}#faceBox{position:absolute;pointer-events:none;border:2px solid silver;transition:left .09s linear,top .09s linear,width .09s linear,height .09s linear}
-footer{margin-top:18px}button{border:1px solid #526369;border-radius:12px;padding:14px 16px;font:inherit;font-weight:650;color:white;background:#243237}
-#start{background:#bcf674;color:#15230c;border-color:transparent;flex:1}button:disabled,#start:disabled{background:#233138;color:#94a4a7}button:focus-visible{outline:3px solid #fff}
+:root {
+  color-scheme:dark;
+  --bg:#0b1216;
+  --surface:#141f25;
+  --border:#2c3d45;
+  --text:#f3f7f5;
+  --muted:#9eafb4;
+  --accent:#c4f477;
+  --green:#62df91;
+  --yellow:#ffd078;
+  --red:#ff8177;
+}
+* { box-sizing:border-box; }
+body {
+  width:min(100% - 32px,520px);
+  margin:0 auto;
+  padding:22px 0 30px;
+  background:var(--bg);
+  color:var(--text);
+  font:15px/1.5 system-ui,sans-serif;
+}
+header,.bar {
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:12px;
+}
+header {
+  padding:4px 2px 18px;
+  border-bottom:1px solid var(--border);
+}
+header b { color:var(--accent); }
+#connection {
+  padding:5px 10px;
+  border:1px solid var(--border);
+  border-radius:30px;
+  color:var(--muted);
+  background:var(--surface);
+}
+h1 {
+  margin:25px 0 3px;
+  font-size:clamp(2rem,8vw,2.7rem);
+  line-height:1.12;
+}
+#trip { color:var(--muted); margin:7px 0 22px; }
+.metrics {
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  padding:20px;
+  border:1px solid var(--border);
+  border-radius:20px;
+  background:#17262d;
+}
+.metrics>div+div {
+  padding-left:20px;
+  border-left:1px solid var(--border);
+}
+.label {
+  display:block;
+  color:var(--muted);
+  font-size:.78rem;
+  font-weight:650;
+  text-transform:uppercase;
+}
+.value { display:block; margin-top:8px; font-size:1.8rem; }
+.value small { color:var(--muted); font-size:.75rem; }
+#risk[data-level="LOW"] { color:var(--green); }
+#risk[data-level="CAUTION"] { color:var(--yellow); }
+#risk[data-level="HIGH"] { color:var(--red); }
+#risk[data-level="UNKNOWN"] { color:var(--muted); }
+output {
+  display:flex;
+  align-items:center;
+  min-height:58px;
+  margin:13px 0 18px;
+  padding:13px 15px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background:var(--surface);
+  overflow-wrap:anywhere;
+}
+#modelPrediction { color:var(--muted); font-size:.82rem; }
+details,.feed {
+  margin-bottom:18px;
+  border:1px solid var(--border);
+  border-radius:15px;
+  background:var(--surface);
+}
+details { padding:12px 14px; }
+summary { cursor:pointer; font-weight:650; }
+#sensorDetails { display:block; margin-top:10px; line-height:1.8; }
+.feed { overflow:hidden; background:#050a0d; }
+.bar { padding:13px 16px; background:#1b2a31; }
+.bar span { color:var(--muted); font-size:.8rem; }
+video {
+  display:block;
+  width:100%;
+  height:clamp(210px,38vh,340px);
+  object-fit:contain;
+}
+footer { display:flex; gap:10px; margin-top:18px; }
+button {
+  min-height:49px;
+  padding:12px 17px;
+  border:1px solid #40535b;
+  border-radius:13px;
+  background:#1b2a31;
+  color:var(--text);
+  font:inherit;
+  font-weight:680;
+}
+button:disabled { opacity:.45; }
+#start {
+  flex:1;
+  border-color:transparent;
+  background:var(--accent);
+  color:#17230c;
+}
+#mountNote { color:var(--muted); font-size:.78rem; }
+@media(max-width:380px) {
+  body { width:min(100% - 24px,520px); padding-top:15px; }
+  .metrics { padding:16px; }
+  .metrics>div+div { padding-left:13px; }
+  .value { font-size:1.55rem; }
+}
 </style>
-<header><strong><b>◈</b> Fleet Guardian</strong><small id="connection">Standby</small></header>
-<h1>Driver monitor</h1><p id="trip">Awaiting assignment details</p>
-<section class="metrics"><div><span class="label">Driver activity</span><strong class="value" id="risk">—</strong></div><div><span class="label">Speed</span><strong class="value"><span id="speed">—</span> <small>km/h</small></strong></div></section>
+</head>
+
+<body>
+
+<header>
+  <strong><b>◈</b> Fleet Guardian</strong>
+  <small id="connection">Standby</small>
+</header>
+
+<h1>Driver monitor</h1>
+<p id="trip">Waiting for server assignment</p>
+
+<section class="metrics">
+  <div>
+    <span class="label">Driver activity</span>
+    <strong class="value" id="risk" data-level="UNKNOWN">—</strong>
+  </div>
+  <div>
+    <span class="label">Current speed</span>
+    <strong class="value"><span id="speed">—</span> <small>km/h</small></strong>
+  </div>
+</section>
+
 <p id="modelPrediction" hidden></p>
 <output id="status" aria-live="polite">Ready to connect</output>
-<details><summary>Sensor details</summary><small id="sensorDetails">Waiting for phone sensors</small></details>
-<figure class="feed"><figcaption class="bar"><strong>Driver camera</strong><span id="cameraState">Off</span></figcaption><div class="view"><video id="camera" autoplay muted playsinline></video><i id="faceBox" hidden></i></div></figure>
-<footer><button id="start">Start monitoring</button><button id="stop" disabled>Stop</button></footer>
-<p><button id="calibrate" disabled>Set road-facing position</button> <small id="mountNote">For a side mount, set this while parked.</small></p>
+
+<details>
+  <summary>Sensor details</summary>
+  <small id="sensorDetails">Waiting for phone sensors</small>
+</details>
+
+<figure class="feed">
+  <figcaption class="bar">
+    <strong>Driver camera</strong>
+    <span id="cameraState">Off</span>
+  </figcaption>
+  <video id="camera" autoplay muted playsinline></video>
+</figure>
+
+<footer>
+  <button id="start">Start monitoring</button>
+  <button id="stop" disabled>Stop</button>
+</footer>
+
+<p id="mountNote">
+  Driver behaviour is classified locally using the browser AI model.
+  Camera preview is sent to the manager only when this driver is selected.
+  Head-pose calibration, eye-closure detection and independent
+  handset verification are not available in this configuration.
+</p>
+
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
+
 <script>
-const video=document.querySelector('video'), statusBox=document.querySelector('output');
-const start=document.querySelector('#start'), stop=document.querySelector('#stop');
-const canvas=document.createElement('canvas'), token=location.hash.slice(1);
-let generation=0, watch=null, stream=null, audio=null, gps=null, motion=null, alarm=null;
-let offset=null, syncedAt=0;
-let anchor=null, gpsStatus='', tripId=null;
-let calibration=null;
-document.querySelector('#calibrate').onclick=()=>{
-  calibration=crypto.randomUUID();
-  field('mountNote').textContent='Look straight at the road and hold still.';
-};
-const previewCanvas=document.createElement('canvas');
-let motionConfirmedUntil=0;
-function updateGPS(position){
-  const c=position.coords, stamp=position.timestamp/1000;
-  if(gps && stamp<=gps.timestamp)return;
-  const previous=gps;
-  gps={timestamp:stamp,speed_mps:c.speed,accuracy_m:c.accuracy,estimated:false};
-  gpsStatus='';
-  if(c.accuracy>30){anchor=null;motionConfirmedUntil=0;return;}
-  // Low GPS speeds can drift even on a desk. Require displacement before
-  // reporting slow movement; retain genuine slow readings once confirmed.
-  if(Number.isFinite(c.speed) && c.speed>=0 && (c.speed===0 || c.speed>=3 || motionConfirmedUntil>stamp)){
-    if(c.speed===0)motionConfirmedUntil=0;
-    if(c.speed>=3)motionConfirmedUntil=stamp+5;
-    anchor=position;return;
+"use strict";
+
+/* Configuration */
+const MODEL_URL = "/models/driver_mobilenetv3_small.onnx";
+const CLASS_NAMES = [
+  "other_activities",
+  "safe_driving",
+  "talking_phone",
+  "texting_phone",
+  "turning"
+];
+
+const SIZE = 224;
+const INFERENCE_INTERVAL = 250;
+const CLOCK_INTERVAL = 30000;
+
+const PREVIEW_INTERVAL = 1000;
+const PREVIEW_WIDTH = 480;
+const PREVIEW_QUALITY = 0.48;
+const PREVIEW_MAX_BYTES = 200000;
+
+const MEAN = [0.485, 0.456, 0.406];
+const STD = [0.229, 0.224, 0.225];
+
+const $ = id => document.getElementById(id);
+const video = $("camera");
+const token = location.hash.slice(1);
+
+let session = null;
+let stream = null;
+let running = false;
+let starting = false;
+let inferenceBusy = false;
+let animationFrame = null;
+let startAttempt = 0;
+
+let gpsPosition = null;
+let gpsStatus = "estimating";
+let gpsWatchId = null;
+let acceleration = [0, 0, 0];
+let gyroscope = [0, 0, 0];
+
+let clockOffset = 0;
+let lastClockSync = 0;
+
+let activeTripId = null;
+let previewEnabled = false;
+let previewTimer = null;
+let previewBusy = false;
+
+let inputCanvas = null;
+let previewCanvas = null;
+
+/* UI */
+function status(message) {
+  $("status").textContent = message;
+}
+
+function connection(message) {
+  $("connection").textContent = message;
+}
+
+function setRisk(level) {
+  const element = $("risk");
+  element.textContent = level || "UNKNOWN";
+  element.dataset.level = level || "UNKNOWN";
+}
+
+function authHeaders(json = true) {
+  const headers = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (token) headers.Authorization = "Bearer " + token;
+  return headers;
+}
+
+function updateSensors() {
+  const gps = gpsPosition ? "available" : gpsStatus;
+  const a = acceleration.map(v => v.toFixed(2)).join(", ");
+  const g = gyroscope.map(v => v.toFixed(2)).join(", ");
+
+  $("sensorDetails").textContent =
+    `GPS: ${gps} | Accelerometer: [${a}] | Gyroscope: [${g}]`;
+}
+
+/* Server and clock */
+async function checkServer() {
+  status("Checking server connection...");
+
+  const response = await fetch("/version", {cache:"no-store"});
+  if (!response.ok) throw Error("Server connection failed.");
+
+  const data = await response.json();
+  if (data.mobile !== 7) {
+    throw Error("Mobile/server version mismatch. Refresh the vehicle link.");
   }
-  gps.speed_mps=null;gpsStatus='estimating';
-  if(previous?.estimated && stamp>=previous.timestamp && stamp-previous.timestamp<5){
-    gps=previous;gpsStatus='';
+}
+
+async function syncClock() {
+  const before = performance.now();
+  const response = await fetch("/clock", {cache:"no-store"});
+
+  if (!response.ok) throw Error("Could not synchronize server clock.");
+
+  const data = await response.json();
+  const after = performance.now();
+
+  if (!Number.isFinite(data.monotonic)) {
+    throw Error("Invalid server clock response.");
   }
-  if(!anchor){anchor=position;return;}
-  const seconds=(position.timestamp-anchor.timestamp)/1000;
-  if(seconds<=0 || seconds>30){anchor=position;motionConfirmedUntil=0;return;}
-  if(seconds<2)return;
-  const rad=Math.PI/180, a=anchor.coords;
-  const north=(c.latitude-a.latitude)*rad;
-  const east=((c.longitude-a.longitude+540)%360-180)*rad*Math.cos((a.latitude+c.latitude)*rad/2);
-  const metres=6371000*Math.hypot(north,east);
-  if(metres<=a.accuracy+c.accuracy){
-    if(seconds>=5 && Math.max(a.accuracy,c.accuracy)<=15 && metres<=Math.max(2,Math.min(a.accuracy,c.accuracy))){
-      gps={timestamp:stamp,speed_mps:0,accuracy_m:c.accuracy,estimated:true};gpsStatus='';
-      if(seconds>=20)anchor=position;
+
+  clockOffset = data.monotonic - (before + after) / 2000;
+  lastClockSync = performance.now();
+}
+
+async function ensureClock() {
+  if (!lastClockSync ||
+      performance.now() - lastClockSync > CLOCK_INTERVAL) {
+    await syncClock();
+  }
+}
+
+function captureTime() {
+  return performance.now() / 1000 + clockOffset;
+}
+
+/* ONNX */
+async function loadModel() {
+  if (!window.ort) throw Error("ONNX Runtime could not load.");
+
+  status("Loading driver AI model...");
+
+  ort.env.wasm.wasmPaths =
+    "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/";
+
+  ort.env.wasm.numThreads = 1;
+
+  try {
+    session = await ort.InferenceSession.create(MODEL_URL, {
+      executionProviders:["wasm"],
+      graphOptimizationLevel:"all"
+    });
+  } catch (error) {
+    console.error(error);
+    throw Error("Could not load models/driver_mobilenetv3_small.onnx: " +
+      (error.message || error));
+  }
+
+  if (!session.inputNames.length || !session.outputNames.length) {
+    throw Error("Model input/output metadata is missing.");
+  }
+}
+
+function makeTensor() {
+  if (!inputCanvas) {
+    inputCanvas = document.createElement("canvas");
+    inputCanvas.width = SIZE;
+    inputCanvas.height = SIZE;
+  }
+
+  const ctx = inputCanvas.getContext("2d", {willReadFrequently:true});
+  ctx.drawImage(video, 0, 0, SIZE, SIZE);
+
+  const pixels = ctx.getImageData(0, 0, SIZE, SIZE).data;
+  const plane = SIZE * SIZE;
+  const values = new Float32Array(3 * plane);
+
+  for (let i = 0; i < plane; i++) {
+    const p = i * 4;
+    values[i] = (pixels[p] / 255 - MEAN[0]) / STD[0];
+    values[plane + i] = (pixels[p + 1] / 255 - MEAN[1]) / STD[1];
+    values[2 * plane + i] = (pixels[p + 2] / 255 - MEAN[2]) / STD[2];
+  }
+
+  return new ort.Tensor("float32", values, [1, 3, SIZE, SIZE]);
+}
+
+function probabilities(values) {
+  const sum = values.reduce((a, b) => a + b, 0);
+
+  if (values.every(v => v >= 0 && v <= 1) &&
+      Math.abs(sum - 1) < 0.02) return values;
+
+  const max = Math.max(...values);
+  const exps = values.map(v => Math.exp(v - max));
+  const total = exps.reduce((a, b) => a + b, 0);
+
+  if (!Number.isFinite(total) || total <= 0) {
+    throw Error("Invalid model output.");
+  }
+
+  return exps.map(v => v / total);
+}
+
+function decode(output) {
+  const values = Array.from(output.data);
+
+  if (values.length !== CLASS_NAMES.length ||
+      !values.every(Number.isFinite)) {
+    throw Error("Unexpected ONNX output. Check model class count and shape.");
+  }
+
+  const probs = probabilities(values);
+  const index = probs.indexOf(Math.max(...probs));
+
+  return {label:CLASS_NAMES[index], confidence:probs[index]};
+}
+
+/* GPS and motion */
+function startSensors() {
+  if (navigator.geolocation) {
+    gpsWatchId = navigator.geolocation.watchPosition(
+      position => {
+        gpsPosition = position;
+        gpsStatus = "available";
+        updateSensors();
+      },
+      error => {
+        gpsStatus = error.code === 1 ? "denied" :
+          error.code === 3 ? "timeout" : "unavailable";
+        updateSensors();
+      },
+      {enableHighAccuracy:true, maximumAge:1000, timeout:10000}
+    );
+  } else {
+    gpsStatus = "unavailable";
+  }
+
+  window.addEventListener("devicemotion", onMotion);
+  updateSensors();
+}
+
+function stopSensors() {
+  if (gpsWatchId !== null && navigator.geolocation) {
+    navigator.geolocation.clearWatch(gpsWatchId);
+  }
+
+  gpsWatchId = null;
+  gpsPosition = null;
+  gpsStatus = "estimating";
+  window.removeEventListener("devicemotion", onMotion);
+}
+
+function onMotion(event) {
+  const a = event.accelerationIncludingGravity || event.acceleration;
+  const r = event.rotationRate;
+
+  const number = v => Number.isFinite(v) ? v : 0;
+
+  if (a) acceleration = [number(a.x), number(a.y), number(a.z)];
+  if (r) gyroscope = [number(r.alpha), number(r.beta), number(r.gamma)];
+
+  updateSensors();
+}
+
+async function requestMotionPermission() {
+  if (typeof DeviceMotionEvent !== "undefined" &&
+      typeof DeviceMotionEvent.requestPermission === "function") {
+    const result = await DeviceMotionEvent.requestPermission();
+    if (result !== "granted") console.warn("Motion permission denied.");
+  }
+}
+
+function gpsPayload() {
+  if (!gpsPosition) return null;
+
+  return {
+    timestamp:gpsPosition.timestamp / 1000,
+    speed_mps:gpsPosition.coords.speed,
+    accuracy_m:gpsPosition.coords.accuracy
+  };
+}
+
+/* Prediction upload */
+async function sendPrediction(prediction, inferenceMs) {
+  const payload = {
+    behavior:prediction.label,
+    confidence:prediction.confidence,
+    classifier_label:prediction.label,
+    classifier_score:prediction.confidence,
+    inference_ms:inferenceMs,
+    server_capture:captureTime(),
+    captured:Date.now() / 1000,
+    gps:gpsPayload(),
+    gps_status:gpsStatus,
+    accelerometer:acceleration,
+    gyroscope:gyroscope
+  };
+
+  const response = await fetch("/prediction", {
+    method:"POST",
+    headers:authHeaders(),
+    body:JSON.stringify(payload),
+    cache:"no-store"
+  });
+
+  const text = await response.text();
+
+  if (response.status === 401 || response.status === 403) {
+    throw Error("Vehicle authentication failed. Get a fresh vehicle link.");
+  }
+
+  if (!response.ok) {
+    throw Error(`Prediction rejected (${response.status}): ${text.slice(0,200)}`);
+  }
+
+  const result = JSON.parse(text);
+  if (!running) return;
+
+  if (result.trip_id != null) activeTripId = result.trip_id;
+
+  updateDashboard(result);
+}
+
+/* Manager-controlled camera preview */
+function makePreviewBlob() {
+  return new Promise((resolve, reject) => {
+    if (!video.videoWidth || !video.videoHeight) return resolve(null);
+
+    if (!previewCanvas) previewCanvas = document.createElement("canvas");
+
+    const scale = Math.min(1, PREVIEW_WIDTH / video.videoWidth);
+    previewCanvas.width = Math.round(video.videoWidth * scale);
+    previewCanvas.height = Math.round(video.videoHeight * scale);
+
+    const ctx = previewCanvas.getContext("2d", {alpha:false});
+    ctx.drawImage(video, 0, 0, previewCanvas.width, previewCanvas.height);
+
+    previewCanvas.toBlob(blob => {
+      if (blob) resolve(blob);
+      else reject(Error("Could not encode preview."));
+    }, "image/jpeg", PREVIEW_QUALITY);
+  });
+}
+
+async function checkPreviewSelection() {
+  try {
+    const response = await fetch("/preview-control", {
+      headers:authHeaders(false),
+      cache:"no-store"
+    });
+
+    if (!response.ok) {
+      previewEnabled = false;
+      return;
     }
+
+    const data = await response.json();
+    previewEnabled = data.enabled === true;
+
+  } catch {
+    previewEnabled = false;
+  }
+
+  $("cameraState").textContent =
+    previewEnabled ? "Manager viewing" : "Private";
+}
+
+async function uploadPreview() {
+  if (!previewEnabled || !activeTripId || previewBusy ||
+      !running || video.readyState < 2) return;
+
+  previewBusy = true;
+
+  try {
+    const blob = await makePreviewBlob();
+
+    if (!blob || !running || !previewEnabled) return;
+    if (blob.size > PREVIEW_MAX_BYTES) return;
+
+    const response = await fetch("/preview", {
+      method:"POST",
+      headers:{
+        ...authHeaders(false),
+        "X-Trip":String(activeTripId),
+        "Content-Type":"image/jpeg"
+      },
+      body:blob,
+      cache:"no-store"
+    });
+
+    if (!response.ok) {
+      console.warn("Preview rejected:", response.status);
+    }
+  } catch (error) {
+    console.warn("Preview upload failed:", error);
+  } finally {
+    previewBusy = false;
+  }
+}
+
+async function previewLoop() {
+  if (!running) return;
+
+  await checkPreviewSelection();
+
+  if (previewEnabled) await uploadPreview();
+
+  if (running) {
+    previewTimer = setTimeout(previewLoop, PREVIEW_INTERVAL);
+  }
+}
+
+function stopPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = null;
+  previewEnabled = false;
+  activeTripId = null;
+  $("cameraState").textContent = "Off";
+}
+
+/* Dashboard */
+function updateDashboard(data) {
+  setRisk(data.risk || "UNKNOWN");
+
+  $("speed").textContent =
+    Number.isFinite(data.speed) ? data.speed.toFixed(1) : "—";
+
+  if (data.driver || data.route) {
+    $("trip").textContent = [data.driver, data.route]
+      .filter(Boolean).join(" · ");
+  }
+
+  const label = data.label || data.prediction;
+  if (label) {
+    $("modelPrediction").hidden = false;
+    $("modelPrediction").textContent = label;
+  }
+
+  status(data.assessment_note || data.reason || "Monitoring active");
+}
+
+/* Inference loop */
+async function predict() {
+  if (!session || !running || inferenceBusy || video.readyState < 2) return;
+
+  inferenceBusy = true;
+
+  try {
+    await ensureClock();
+    if (!running) return;
+
+    const started = performance.now();
+    const results = await session.run({
+      [session.inputNames[0]]:makeTensor()
+    });
+
+    if (!running) return;
+
+    const prediction = decode(results[session.outputNames[0]]);
+    const duration = performance.now() - started;
+
+    $("modelPrediction").hidden = false;
+    $("modelPrediction").textContent =
+      prediction.label + " · " + (prediction.confidence * 100).toFixed(1) + "%";
+
+    await sendPrediction(prediction, duration);
+  } finally {
+    inferenceBusy = false;
+  }
+}
+
+async function inferenceLoop() {
+  if (!running) return;
+
+  try {
+    await predict();
+  } catch (error) {
+    console.error(error);
+    cleanup();
+    connection("Error");
+    status(error.message || "Monitoring failed.");
     return;
   }
-  const speed=metres/seconds;
-  anchor=position;
-  if(speed<=250/3.6){motionConfirmedUntil=stamp+5;gps={timestamp:stamp,speed_mps:speed,accuracy_m:c.accuracy,estimated:true};gpsStatus='';}
+
+  if (running) {
+    animationFrame = setTimeout(inferenceLoop, INFERENCE_INTERVAL);
+  }
 }
-async function preview(id){
-  if(id!==generation)return;
-  try{
-    if(tripId && !document.hidden && video.readyState>=2 && video.videoWidth){
-      const trip=tripId, scale=Math.min(1,480/Math.max(video.videoWidth,video.videoHeight));
-      previewCanvas.width=Math.round(video.videoWidth*scale);
-      previewCanvas.height=Math.round(video.videoHeight*scale);
-      previewCanvas.getContext('2d').drawImage(video,0,0,previewCanvas.width,previewCanvas.height);
-      const jpeg=await new Promise(resolve=>previewCanvas.toBlob(resolve,'image/jpeg',.6));
-      if(jpeg && id===generation){
-        const response=await fetch('/preview',{method:'POST',headers:{Authorization:'Bearer '+token,'X-Trip':String(trip)},body:jpeg,signal:AbortSignal.timeout(1200)});
-        if(!response.ok)throw Error('Preview unavailable');
-        const tracking=await response.json();
-        if(id===generation)showBox(tracking.box,tracking.level);
+
+/* Start and stop */
+function cleanup() {
+  running = false;
+  starting = false;
+  startAttempt++;
+
+  clearTimeout(animationFrame);
+  animationFrame = null;
+
+  stopPreview();
+  stopSensors();
+
+  if (stream) {
+    stream.getTracks().forEach(track => track.stop());
+    stream = null;
+  }
+
+  video.srcObject = null;
+  $("cameraState").textContent = "Off";
+  $("stop").disabled = true;
+  $("start").disabled = false;
+}
+
+async function startMonitoring() {
+  if (running || starting) return;
+
+  if (!token) {
+    connection("Error");
+    status("Missing vehicle token. Open the complete link from the manager.");
+    return;
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    connection("Error");
+    status("Camera access requires HTTPS and a supported browser.");
+    return;
+  }
+
+  starting = true;
+  $("start").disabled = true;
+  const attempt = ++startAttempt;
+
+  try {
+    connection("Connecting");
+
+    await checkServer();
+    if (attempt !== startAttempt) return;
+
+    await syncClock();
+    if (attempt !== startAttempt) return;
+
+    if (!session) await loadModel();
+    if (attempt !== startAttempt) return;
+
+    await requestMotionPermission();
+    if (attempt !== startAttempt) return;
+
+    status("Requesting camera permission...");
+
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio:false,
+      video:{
+        facingMode:"user",
+        width:{ideal:640},
+        height:{ideal:480}
       }
+    });
+
+    if (attempt !== startAttempt) {
+      stream.getTracks().forEach(track => track.stop());
+      stream = null;
+      return;
     }
-  }catch(error){if(id===generation)showBox(null);}
-  if(id===generation)setTimeout(()=>preview(id),65);
-}
-const field=id=>document.getElementById(id);
-function showBox(box,level){
-  const el=field('faceBox');el.hidden=!box;
-  field('cameraState').textContent=box?'Face tracked':'Looking for face';
-  if(!box)return;
-  const scale=Math.min(video.clientWidth/video.videoWidth,video.clientHeight/video.videoHeight);
-  const w=video.videoWidth*scale,h=video.videoHeight*scale;
-  el.style.left=((video.clientWidth-w)/2+box[0]*w)+'px';el.style.top=((video.clientHeight-h)/2+box[1]*h)+'px';
-  el.style.width=box[2]*w+'px';el.style.height=box[3]*h+'px';
-  el.style.borderColor=({LOW:'#44d264',CAUTION:'#ff9b23',HIGH:'#f5413c'})[level]||'silver';
-}
-function assessment(level,speed,label='—'){
-  field('risk').textContent=label;field('risk').dataset.level=level;
-  field('speed').textContent=Number.isFinite(speed)?speed.toFixed(1):'—';
-}
-function gpsDetail(){
-  if(!gps)return ({denied:'Location permission denied',timeout:'Location request timed out',
-    unavailable:'Phone location unavailable'})[gpsStatus] || 'Waiting for a location fix';
-  const age=Math.max(0,Math.floor(Date.now()/1000-gps.timestamp));
-  const accuracy=Math.round(gps.accuracy_m);
-  if(age>5)return 'GPS fix is '+age+' seconds old';
-  if(accuracy>30)return 'GPS accuracy ±'+accuracy+' m · move outdoors for a clearer fix';
-  return 'GPS accuracy ±'+accuracy+' m'+(gps.speed_mps===null?' · waiting for measurable movement':'');
-}
-async function syncClock(){
-  const before=performance.now();
-  const response=await fetch('/clock',{cache:'no-store',signal:AbortSignal.timeout(3000)});
-  if(!response.ok)throw Error('Restart the PC launcher and reopen the new vehicle link.');
-  const serverTime=await response.json(), after=performance.now();
-  if(after-before>1500)throw Error('Slow Wi-Fi. Retrying connection…');
-  offset=serverTime-(before+after)/2000;syncedAt=after;
-}
-function readMotion(e){
-  function vector(obj,keys,scale){
-    if(!obj || !keys.every(k=>Number.isFinite(obj[k])))return null;
-    return keys.map(k=>obj[k]*scale);
+
+    video.srcObject = stream;
+    await video.play();
+
+    if (attempt !== startAttempt) return;
+    if (!video.videoWidth) throw Error("Camera produced no video frames.");
+
+    startSensors();
+
+    running = true;
+    starting = false;
+
+    connection("Monitoring");
+    status("Driver monitoring started");
+    setRisk("UNKNOWN");
+
+    $("cameraState").textContent = "Private";
+    $("stop").disabled = false;
+    $("start").disabled = true;
+
+    previewLoop();
+    inferenceLoop();
+
+  } catch (error) {
+    console.error(error);
+    cleanup();
+    connection("Error");
+    status(error.message || "Unable to start monitoring.");
   }
-  motion={time:Date.now(),accelerometer:vector(e.accelerationIncludingGravity,['x','y','z'],1),
-          gyroscope:vector(e.rotationRate,['beta','gamma','alpha'],Math.PI/180)};
 }
-function end(){
-  field('modelPrediction').hidden=true;
-  calibration=null;field('calibrate').disabled=false;field('mountNote').textContent='For a side mount, set this while parked.';
-  showBox(null);
-  generation++;
-  if(watch!==null)navigator.geolocation.clearWatch(watch);
-  if(stream)stream.getTracks().forEach(track=>track.stop());
-  window.removeEventListener('devicemotion',readMotion);
-  setAlarm(false);
-  if(audio)audio.close().catch(()=>{});
-  watch=null;stream=null;gps=null;motion=null;audio=null;video.srcObject=null;
-  field('sensorDetails').textContent='Sensors stopped';
-  anchor=null;motionConfirmedUntil=0;gpsStatus='';tripId=null;
-  start.disabled=false;stop.disabled=true;statusBox.textContent='Stopped';
-  offset=null;assessment('—',null);field('cameraState').textContent='Off';field('connection').textContent='Standby';field('trip').textContent='Monitoring ended';
+
+function stopMonitoring() {
+  cleanup();
+  connection("Stopped");
+  status("Monitoring stopped");
 }
-function setAlarm(active){
-  if(!active){
-    if(alarm){alarm.stop();alarm.disconnect();alarm=null;}
-    return;
-  }
-  if(alarm || !audio)return;
-  const rate=16000, half=rate/4;
-  const warning=audio.createBuffer(1,half*2,rate);
-  const samples=warning.getChannelData(0);
-  for(let i=0;i<half;i++){
-    samples[i]=.32*Math.sin(2*Math.PI*880*i/rate);
-    samples[i+half]=.32*Math.sin(2*Math.PI*1320*i/rate);
-  }
-  alarm=audio.createBufferSource();
-  alarm.buffer=warning;
-  alarm.loop=true;
-  alarm.connect(audio.destination);
-  alarm.start();
-}
-async function send(id){
-  if(id!==generation)return;
-  try{
-    if(document.hidden || video.readyState<2 || !video.videoWidth)throw Error('Waiting for a visible camera preview');
-    if(offset===null || performance.now()-syncedAt>60000)await syncClock();
-    if(id!==generation)return;
-    const scale=Math.min(1,480/Math.max(video.videoWidth,video.videoHeight));
-    canvas.width=Math.round(video.videoWidth*scale);canvas.height=Math.round(video.videoHeight*scale);
-    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
-    const packet={captured:Date.now()/1000,server_capture:performance.now()/1000+offset,jpeg:canvas.toDataURL('image/jpeg',.65).split(',')[1],gps};
-    packet.separate_preview=true;packet.gps_status=gpsStatus;
-    if(calibration)packet.calibrate=calibration;
-    if(motion && Date.now()-motion.time<3000){
-      packet.accelerometer=motion.accelerometer;packet.gyroscope=motion.gyroscope;
-    }
-    const response=await fetch('/sample',{method:'POST',headers:{Authorization:'Bearer '+token,
-      'Content-Type':'application/json'},body:JSON.stringify(packet),signal:AbortSignal.timeout(6500)});
-    if(!response.ok)throw Error(await response.text());
-    const report=await response.json();
-    if(id!==generation)return;
-    field('trip').textContent=report.driver+' · '+report.route;field('connection').textContent='Connected';
-    tripId=report.trip_id;
-    field('calibrate').disabled=false;
-    if(!calibration || calibration===report.calibration_id){
-      calibration=null;
-      field('mountNote').textContent=report.mount_note || 'For a side mount, set this while parked.';
-    }
-    assessment(report.risk,report.speed,report.label);
-    field('modelPrediction').hidden=!report.prediction || report.prediction===report.label || report.prediction.startsWith('Phone-use prediction rejected');
-    field('modelPrediction').textContent='Model prediction · '+(report.prediction||'');
-    statusBox.textContent=report.risk==='HIGH'?'High risk · '+report.reason:
-      report.risk==='CAUTION'?'Caution · '+report.reason:
-      report.speed===null?'Camera active · Waiting for GPS':
-      report.speed===0?(report.speed_method==='GPS estimate'?'Appears stationary':'Stopped'):'No active alert';
-    field('sensorDetails').textContent=gpsDetail()+' · Raw model guess: '+(report.raw_label||report.behavior).replaceAll('_',' ')+' (score '+(report.raw_score??report.confidence).toFixed(2)+') · Handset: '+(report.handset?'detected':'unconfirmed');
-    setAlarm(report.risk==='HIGH');
-  }catch(error){if(id===generation){setAlarm(false);offset=null;assessment('UNKNOWN',null);field('modelPrediction').hidden=true;field('connection').textContent='Retrying';statusBox.textContent=error.message;}}
-  if(id===generation)setTimeout(()=>send(id),550);
-}
-start.onclick=async()=>{
-  const id=++generation;start.disabled=true;stop.disabled=false;
-  try{
-    if(!token)throw Error('Open your vehicle link from the manager.');
-    audio=new AudioContext();
-    await audio.resume();
-    if(id!==generation)return;
-    const version=await fetch('/version',{cache:'no-store',signal:AbortSignal.timeout(4000)});
-    if(!version.ok || (await version.json()).mobile!==6)
-      throw Error('Close the manager windows on the PC, restart the launcher, then open the newly copied vehicle link.');
-    statusBox.textContent='Allow camera, location and motion access.';
-    if(id!==generation)return;
-    if(window.DeviceMotionEvent && typeof DeviceMotionEvent.requestPermission==='function')
-      await DeviceMotionEvent.requestPermission();
-    if(id!==generation)return;
-    window.addEventListener('devicemotion',readMotion);
-    const camera=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
-    if(id!==generation){camera.getTracks().forEach(t=>t.stop());return;}
-    stream=camera;video.srcObject=stream;await video.play();
-    field('cameraState').textContent='Live preview';field('connection').textContent='Connecting';
-    if(id!==generation)return;
-    watch=navigator.geolocation.watchPosition(updateGPS,e=>{
-      gps=null;anchor=null;motionConfirmedUntil=0;gpsStatus=({1:'denied',2:'unavailable',3:'timeout'})[e.code]||'unavailable';
-    },{enableHighAccuracy:true,maximumAge:0,timeout:5000});
-    preview(id);
-    send(id);
-  }catch(error){if(id===generation){end();statusBox.textContent=error.message;}}
-};
-stop.onclick=end;window.addEventListener('pagehide',end);
-</script></html>
+
+/* Events */
+$("start").addEventListener("click", startMonitoring);
+$("stop").addEventListener("click", stopMonitoring);
+window.addEventListener("beforeunload", cleanup);
+
+updateSensors();
+</script>
+</body>
+</html>
