@@ -14,9 +14,10 @@ const CLASS_NAMES = [
 ];
 
 /* Must match the ONNX model input dimensions */
+
 const SIZE = 256;
 
-/* AI inference remains unchanged */
+/* AI inference configuration */
 
 const INFERENCE_INTERVAL = 250;
 

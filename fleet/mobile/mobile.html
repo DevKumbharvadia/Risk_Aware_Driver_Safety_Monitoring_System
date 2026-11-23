@@ -16,6 +16,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.min.js"></script>
 
+    <script src="/js/drowsiness.js" defer></script>
     <script src="/js/config.js" defer></script>
     <script src="/js/ui.js" defer></script>
     <script src="/js/sensors.js" defer></script>
@@ -39,6 +40,7 @@
 
     <div>
         <span class="label">Driver activity</span>
+
         <strong class="value"
                 id="risk"
                 data-level="UNKNOWN">—</strong>
@@ -51,6 +53,18 @@
             <span id="speed">—</span>
             <small>km/h</small>
         </strong>
+    </div>
+
+    <div>
+        <span class="label">Drowsiness</span>
+
+        <strong class="value"
+                id="drowsiness"
+                data-level="UNKNOWN">Unavailable</strong>
+
+        <small id="drowsinessDetails">
+            Waiting for facial measurements
+        </small>
     </div>
 
 </section>
@@ -98,9 +112,7 @@
     <div class="speed-scale">
         <span>0 km/h</span>
 
-        <strong id="speedDisplay">
-            60 km/h
-        </strong>
+        <strong id="speedDisplay">60 km/h</strong>
 
         <span>160 km/h</span>
     </div>
@@ -133,11 +145,8 @@
 <figure class="feed">
 
     <figcaption class="bar">
-
         <strong>Driver camera</strong>
-
         <span id="cameraState">Off</span>
-
     </figcaption>
 
     <video id="camera"
@@ -149,23 +158,23 @@
 
 <footer>
 
-    <button id="start">
+    <button id="start" type="button">
         Start monitoring
     </button>
 
-    <button id="stop" disabled>
+    <button id="stop"
+            type="button"
+            disabled>
         Stop
     </button>
 
 </footer>
 
 <p id="mountNote">
-    Driver behaviour is classified locally using
-    the browser AI model. Camera preview is sent
-    to the manager only when this driver is selected.
-    Head-pose calibration, eye-closure detection
-    and independent handset verification are not
-    available in this configuration.
+    Driver behaviour and drowsiness are analysed locally
+    in this browser. Only calculated measurements are sent
+    to the manager. Keep the camera positioned so the
+    driver's face and eyes are visible.
 </p>
 
 </body>

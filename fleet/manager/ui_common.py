@@ -2,6 +2,7 @@
 """Shared Tkinter styling and formatting; no business logic."""
 
 from datetime import datetime, timezone
+import math
 import sys
 import tkinter as tk
 from tkinter import ttk
@@ -36,9 +37,11 @@ def enable_high_dpi():
 
         try:
             ctypes.windll.shcore.SetProcessDpiAwareness(2)
+
         except (AttributeError, OSError):
             try:
                 ctypes.windll.user32.SetProcessDPIAware()
+
             except (AttributeError, OSError):
                 pass
 
@@ -113,8 +116,31 @@ def setup_style(root):
 def make_table(parent, columns, widths=None, height=15):
     """Create a Treeview with vertical and horizontal scrollbars."""
 
+    if not isinstance(columns, (tuple, list)) or not columns:
+        raise ValueError("Table columns must be a non-empty sequence.")
+
+    if isinstance(height, bool) or not isinstance(height, int) or height <= 0:
+        raise ValueError("Table height must be a positive integer.")
+
+    if widths is not None:
+        if not isinstance(widths, (tuple, list)):
+            raise ValueError("Table widths must be a sequence.")
+
+        for width in widths:
+            if (
+                isinstance(width, bool)
+                or not isinstance(width, (int, float))
+                or not math.isfinite(width)
+                or width <= 0
+            ):
+                raise ValueError("Table column widths must be positive.")
+
     wrapper = ttk.Frame(parent)
-    wrapper.pack(fill="both", expand=True, pady=8)
+    wrapper.pack(
+        fill="both",
+        expand=True,
+        pady=8,
+    )
 
     tree = ttk.Treeview(
         wrapper,
@@ -124,16 +150,21 @@ def make_table(parent, columns, widths=None, height=15):
     )
 
     for index, column in enumerate(columns):
-        width = widths[index] if widths and index < len(widths) else 130
+
+        width = (
+            widths[index]
+            if widths and index < len(widths)
+            else 130
+        )
 
         tree.heading(
             column,
-            text=column.replace("_", " ").title(),
+            text=str(column).replace("_", " ").title(),
         )
 
         tree.column(
             column,
-            width=width,
+            width=int(width),
             minwidth=60,
         )
 
@@ -154,15 +185,32 @@ def make_table(parent, columns, widths=None, height=15):
         xscrollcommand=horizontal.set,
     )
 
-    tree.grid(row=0, column=0, sticky="nsew")
-    vertical.grid(row=0, column=1, sticky="ns")
-    horizontal.grid(row=1, column=0, sticky="ew")
+    tree.grid(
+        row=0,
+        column=0,
+        sticky="nsew",
+    )
+
+    vertical.grid(
+        row=0,
+        column=1,
+        sticky="ns",
+    )
+
+    horizontal.grid(
+        row=1,
+        column=0,
+        sticky="ew",
+    )
 
     wrapper.rowconfigure(0, weight=1)
     wrapper.columnconfigure(0, weight=1)
 
     for level, color in COLORS.items():
-        tree.tag_configure(level, foreground=color)
+        tree.tag_configure(
+            level,
+            foreground=color,
+        )
 
     return tree
 
@@ -173,10 +221,15 @@ def _parse_datetime(value):
     if not isinstance(value, str) or not value.strip():
         return None
 
-    try:
-        parsed = datetime.fromisoformat(value.strip())
+    value = value.strip()
 
-        if parsed.tzinfo is None:
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(value)
+
+        if parsed.tzinfo is None or parsed.utcoffset() is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
 
         return parsed.astimezone(timezone.utc)
@@ -196,7 +249,9 @@ def local_time(value):
     if parsed is None:
         return str(value)
 
-    return parsed.astimezone().strftime("%d %b %H:%M:%S")
+    return parsed.astimezone().strftime(
+        "%d %b %H:%M:%S"
+    )
 
 
 def vehicle_status(vehicle):
@@ -213,16 +268,26 @@ def vehicle_status(vehicle):
     if not isinstance(sample, dict):
         return "OFFLINE"
 
-    captured = _parse_datetime(sample.get("captured_at"))
-    received = _parse_datetime(sample.get("received_at"))
+    captured = _parse_datetime(
+        sample.get("captured_at")
+    )
+
+    received = _parse_datetime(
+        sample.get("received_at")
+    )
 
     if captured is None or received is None:
         return "OFFLINE"
 
     now = datetime.now(timezone.utc)
 
-    captured_age = (now - captured).total_seconds()
-    received_age = (now - received).total_seconds()
+    captured_age = (
+        now - captured
+    ).total_seconds()
+
+    received_age = (
+        now - received
+    ).total_seconds()
 
     if (
         captured_age < -5
@@ -232,9 +297,32 @@ def vehicle_status(vehicle):
     ):
         return "OFFLINE"
 
-    level = str(sample.get("level", "UNKNOWN")).upper()
+    level = str(
+        sample.get("level", "UNKNOWN")
+    ).strip().upper()
 
-    return level if level in VALID_RISK_LEVELS else "UNKNOWN"
+    if level not in VALID_RISK_LEVELS:
+        return "UNKNOWN"
+
+    score = sample.get("score")
+
+    if score is not None:
+        try:
+            if isinstance(score, bool):
+                return "UNKNOWN"
+
+            score = float(score)
+
+            if (
+                not math.isfinite(score)
+                or score < 0
+            ):
+                return "UNKNOWN"
+
+        except (TypeError, ValueError, OverflowError):
+            return "UNKNOWN"
+
+    return level
 
 
 def fill_table(tree, rows):
@@ -243,9 +331,13 @@ def fill_table(tree, rows):
     if tree is None:
         return
 
+    if not isinstance(rows, (tuple, list)):
+        return
+
     wanted = set()
 
     for index, entry in enumerate(rows):
+
         if not isinstance(entry, (tuple, list)) or len(entry) != 3:
             continue
 
@@ -259,12 +351,20 @@ def fill_table(tree, rows):
         if not row_id:
             continue
 
+        if row_id in wanted:
+            continue
+
         wanted.add(row_id)
 
-        values = tuple(values) if values is not None else ()
-        tags = tuple(tags) if tags is not None else ()
+        try:
+            values = tuple(values) if values is not None else ()
+            tags = tuple(tags) if tags is not None else ()
+
+        except TypeError:
+            continue
 
         if tree.exists(row_id):
+
             current = tree.item(row_id)
 
             changed = (
@@ -279,12 +379,20 @@ def fill_table(tree, rows):
                     tags=tags,
                 )
 
-            # Move only when the row is not already at its target position.
             children = tree.get_children()
-            current_index = children.index(row_id)
+
+            try:
+                current_index = children.index(row_id)
+
+            except ValueError:
+                current_index = -1
 
             if current_index != index:
-                tree.move(row_id, "", index)
+                tree.move(
+                    row_id,
+                    "",
+                    index,
+                )
 
         else:
             tree.insert(
@@ -296,5 +404,6 @@ def fill_table(tree, rows):
             )
 
     for row_id in tree.get_children():
+
         if row_id not in wanted:
             tree.delete(row_id)

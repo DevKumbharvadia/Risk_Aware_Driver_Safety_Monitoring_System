@@ -28,7 +28,10 @@ async function loadModel() {
 
     } catch (error) {
 
-        console.error("ONNX model loading error:", error);
+        console.error(
+            "ONNX model loading error:",
+            error
+        );
 
         throw Error(
             `Could not load ${MODEL_URL}: ${error.message || error}`
@@ -39,22 +42,21 @@ async function loadModel() {
         !session.inputNames.length ||
         !session.outputNames.length
     ) {
-        throw Error("Model input/output metadata is missing.");
+        throw Error(
+            "Model input/output metadata is missing."
+        );
     }
 
-    const inputMetadata = session.inputMetadata?.[0];
-
-    console.info(
-        "ONNX model loaded.",
-        {
-            inputs: session.inputNames,
-            outputs: session.outputNames,
-            inputMetadata,
-            expectedSize: SIZE,
-            classes: CLASS_NAMES
-        }
-    );
+    console.info("ONNX model loaded.", {
+        inputs: session.inputNames,
+        outputs: session.outputNames,
+        inputMetadata: session.inputMetadata?.[0],
+        outputMetadata: session.outputMetadata?.[0],
+        expectedSize: SIZE,
+        classes: CLASS_NAMES
+    });
 }
+
 
 /* Convert camera image into model tensor */
 
@@ -78,7 +80,9 @@ function makeTensor() {
     );
 
     if (!context) {
-        throw Error("Could not create image processing context.");
+        throw Error(
+            "Could not create image processing context."
+        );
     }
 
     context.drawImage(
@@ -98,7 +102,9 @@ function makeTensor() {
 
     const plane = SIZE * SIZE;
 
-    const values = new Float32Array(3 * plane);
+    const values = new Float32Array(
+        3 * plane
+    );
 
     for (let i = 0; i < plane; i++) {
 
@@ -121,6 +127,7 @@ function makeTensor() {
     );
 }
 
+
 /* Probability calculation */
 
 function softmax(values) {
@@ -136,14 +143,20 @@ function softmax(values) {
         0
     );
 
-    if (!Number.isFinite(sum) || sum <= 0) {
-        throw Error("Invalid model output: softmax failed.");
+    if (
+        !Number.isFinite(sum) ||
+        sum <= 0
+    ) {
+        throw Error(
+            "Invalid model output: softmax failed."
+        );
     }
 
     return exponentials.map(
         value => value / sum
     );
 }
+
 
 function probabilities(values) {
 
@@ -166,19 +179,24 @@ function probabilities(values) {
         : softmax(values);
 }
 
+
 /* Decode ONNX result */
 
 function decode(output) {
 
     if (!output || !output.data) {
-        throw Error("ONNX output tensor is missing.");
+        throw Error(
+            "ONNX output tensor is missing."
+        );
     }
 
     const values = Array.from(output.data);
 
     const shape = output.dims || [];
 
-    if (values.length !== CLASS_NAMES.length) {
+    if (
+        values.length !== CLASS_NAMES.length
+    ) {
 
         console.error(
             "Unexpected ONNX output shape",
@@ -196,7 +214,9 @@ function decode(output) {
     }
 
     if (!values.every(Number.isFinite)) {
-        throw Error("ONNX output contains invalid numeric values.");
+        throw Error(
+            "ONNX output contains invalid numeric values."
+        );
     }
 
     const probs = probabilities(values);
@@ -210,7 +230,7 @@ function decode(output) {
         }
     }
 
-    const prediction = {
+    return {
         index: best,
         label: CLASS_NAMES[best],
         confidence: probs[best],
@@ -218,16 +238,123 @@ function decode(output) {
         raw: values,
         shape
     };
-
-    return prediction;
 }
+
+
+/* Browser-side drowsiness measurement */
+
+function getDrowsinessMeasurement() {
+
+    const unavailable = {
+        available: false,
+        face_detected: false,
+        eyes_closed: false,
+        ear: null,
+        left_ear: null,
+        right_ear: null,
+        perclos: null,
+        alert_level: "UNKNOWN",
+        closed_duration: 0
+    };
+
+    if (!window.drowsinessDetector) {
+        console.error(
+            "MediaPipe drowsiness detector is missing."
+        );
+
+        return unavailable;
+    }
+
+    try {
+
+        const result =
+            window.drowsinessDetector.detect(video);
+
+        if (!result || result.available !== true) {
+
+            console.warn(
+                "MediaPipe returned unavailable measurements.",
+                result
+            );
+
+            updateDrowsinessDisplay(unavailable);
+
+            return unavailable;
+        }
+
+        const measurement = {
+
+            available: true,
+
+            face_detected:
+                result.face_detected === true,
+
+            eyes_closed:
+                result.eyes_closed === true,
+
+            ear:
+                Number.isFinite(result.ear)
+                    ? result.ear
+                    : null,
+
+            left_ear:
+                Number.isFinite(result.left_ear)
+                    ? result.left_ear
+                    : null,
+
+            right_ear:
+                Number.isFinite(result.right_ear)
+                    ? result.right_ear
+                    : null,
+
+            perclos:
+                Number.isFinite(result.perclos)
+                    ? result.perclos
+                    : null,
+
+            alert_level:
+                typeof result.alert_level === "string"
+                    ? result.alert_level
+                    : "UNKNOWN",
+
+            closed_duration:
+                Number.isFinite(result.closed_duration)
+                    ? result.closed_duration
+                    : 0
+        };
+
+        /*
+         * Update phone display immediately.
+         * Do not wait for the Python server response.
+         */
+
+        updateDrowsinessDisplay({
+            ...measurement
+        });
+
+        return measurement;
+
+    } catch (error) {
+
+        console.error(
+            "MediaPipe detection error:",
+            error
+        );
+
+        updateDrowsinessDisplay(unavailable);
+
+        return unavailable;
+    }
+}
+
 
 /* Upload prediction to server */
 
 async function sendPrediction(
     prediction,
     inferenceMs,
-    capturedAt
+    capturedAt,
+    drowsiness
 ) {
 
     const payload = {
@@ -260,7 +387,36 @@ async function sendPrediction(
 
         test_speed_kmh: manualSpeedEnabled
             ? manualSpeedKmh
-            : null
+            : null,
+
+        /* MediaPipe measurements */
+
+        drowsiness_available:
+            drowsiness.available,
+
+        face_detected:
+            drowsiness.face_detected,
+
+        eyes_closed:
+            drowsiness.eyes_closed,
+
+        ear:
+            drowsiness.ear,
+
+        left_ear:
+            drowsiness.left_ear,
+
+        right_ear:
+            drowsiness.right_ear,
+
+        perclos:
+            drowsiness.perclos,
+
+        drowsiness_alert_level:
+            drowsiness.alert_level,
+
+        closed_duration:
+            drowsiness.closed_duration
     };
 
     const response = await fetch(
@@ -290,9 +446,7 @@ async function sendPrediction(
             "Prediction upload rejected",
             {
                 status: response.status,
-                response: responseText,
-                captured: capturedAt,
-                payload
+                response: responseText
             }
         );
 
@@ -309,16 +463,9 @@ async function sendPrediction(
     let result;
 
     try {
-
         result = JSON.parse(responseText);
 
     } catch {
-
-        console.error(
-            "Invalid server JSON response:",
-            responseText
-        );
-
         throw Error(
             "Server returned an invalid prediction response."
         );
@@ -333,7 +480,21 @@ async function sendPrediction(
     }
 
     updateDashboard(result);
+
+    /*
+     * Preserve the latest local drowsiness reading.
+     * The Python response may not yet contain all eye measurements.
+     */
+
+    updateDrowsinessDisplay({
+        available: drowsiness.available,
+        face_detected: drowsiness.face_detected,
+        alert_level: drowsiness.alert_level,
+        ear: drowsiness.ear,
+        perclos: drowsiness.perclos
+    });
 }
+
 
 /* Run one inference */
 
@@ -352,27 +513,36 @@ async function predict() {
 
     try {
 
-        /*
-         * Synchronize the clock before capturing the frame.
-         * The capture timestamp must represent the actual
-         * observation time, not the upload completion time.
-         */
-
         await ensureClock();
 
         if (!running) {
             return;
         }
 
-        const capturedAt = Date.now() / 1000;
+        const capturedAt =
+            Date.now() / 1000;
 
-        const started = performance.now();
+        const started =
+            performance.now();
+
+        /*
+         * Run facial analysis on the current camera frame.
+         */
+
+        const drowsiness =
+            getDrowsinessMeasurement();
+
+        /*
+         * Run behaviour classification.
+         */
 
         const tensor = makeTensor();
 
-        const input = session.inputNames[0];
+        const input =
+            session.inputNames[0];
 
-        const outputName = session.outputNames[0];
+        const outputName =
+            session.outputNames[0];
 
         const results = await session.run({
             [input]: tensor
@@ -397,11 +567,6 @@ async function predict() {
 
         showClientPrediction(prediction);
 
-        /*
-         * Discard observations that have already become
-         * too old locally instead of uploading stale data.
-         */
-
         const ageMs =
             Date.now() - capturedAt * 1000;
 
@@ -409,8 +574,7 @@ async function predict() {
 
             console.warn(
                 "Skipping stale local prediction:",
-                ageMs,
-                "ms"
+                ageMs
             );
 
             return;
@@ -419,7 +583,8 @@ async function predict() {
         await sendPrediction(
             prediction,
             duration,
-            capturedAt
+            capturedAt,
+            drowsiness
         );
 
     } finally {
@@ -427,6 +592,7 @@ async function predict() {
         inferenceBusy = false;
     }
 }
+
 
 /* Inference scheduler */
 
@@ -447,11 +613,6 @@ async function inferenceLoop() {
             error
         );
 
-        /*
-         * A delayed prediction is not automatically
-         * an authentication or connection failure.
-         */
-
         if (
             error.status === 400 &&
             /delayed prediction/i.test(
@@ -459,11 +620,9 @@ async function inferenceLoop() {
             )
         ) {
 
-            console.warn(
-                "Manager rejected an outdated observation. Monitoring will continue."
+            status(
+                "Skipping delayed prediction. Monitoring continues."
             );
-
-            status("Skipping delayed prediction. Monitoring continues.");
 
             if (running) {
 

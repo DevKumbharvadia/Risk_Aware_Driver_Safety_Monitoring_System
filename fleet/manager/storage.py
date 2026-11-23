@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sqlite3
+import math
 
 
 ENTITY_FIELDS = {
@@ -24,7 +25,39 @@ ENTITY_LABELS = {
 def utc_now():
     """Return the current UTC time as an ISO timestamp."""
 
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
+    return datetime.now(timezone.utc).isoformat(
+        timespec="milliseconds"
+    )
+
+
+def parse_timestamp(value, label="timestamp"):
+    """Parse an ISO timestamp and return an aware UTC datetime."""
+
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f"Invalid {label}.")
+
+    value = value.strip()
+
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"Invalid {label}.") from None
+
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError(f"{label.title()} must include a timezone.")
+
+    return parsed.astimezone(timezone.utc)
+
+
+def normalize_timestamp(value, label="timestamp"):
+    """Validate and normalize an ISO timestamp to UTC."""
+
+    return parse_timestamp(value, label).isoformat(
+        timespec="milliseconds"
+    )
 
 
 def positive_id(value, label="record"):
@@ -38,10 +71,38 @@ def positive_id(value, label="record"):
     except (TypeError, ValueError, OverflowError):
         raise ValueError(f"Invalid {label} ID.") from None
 
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError(f"Invalid {label} ID.")
+
+    if isinstance(value, str) and str(result) != value.strip():
+        raise ValueError(f"Invalid {label} ID.")
+
     if result <= 0:
         raise ValueError(f"Invalid {label} ID.")
 
     return result
+
+
+def non_negative_integer(value, label):
+    """Validate an integer-valued, non-negative numeric value."""
+
+    if isinstance(value, bool):
+        raise ValueError(f"Invalid {label}.")
+
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"Invalid {label}.") from None
+
+    if (
+        not math.isfinite(number)
+        or number < 0
+        or not number.is_integer()
+    ):
+        raise ValueError(f"Invalid {label}.")
+
+    return int(number)
 
 
 class Store:
@@ -128,7 +189,11 @@ class Store:
     def connection(self):
         """Create and safely close an independent SQLite connection."""
 
-        db = sqlite3.connect(self.path, timeout=10)
+        db = sqlite3.connect(
+            self.path,
+            timeout=10,
+        )
+
         db.row_factory = sqlite3.Row
 
         try:
@@ -137,6 +202,7 @@ class Store:
 
             with db:
                 yield db
+
         finally:
             db.close()
 
@@ -151,14 +217,23 @@ class Store:
             ("Kabir Desai", "LIC-003", "Contact"),
         )
 
-        destinations = ("Campus", "Station", "Warehouse")
+        destinations = (
+            "Campus",
+            "Station",
+            "Warehouse",
+        )
 
         with self.connection() as db:
+
             counts = [
                 db.execute(
                     f"SELECT COUNT(*) FROM {table}"
                 ).fetchone()[0]
-                for table in ("vehicles", "drivers", "routes")
+                for table in (
+                    "vehicles",
+                    "drivers",
+                    "routes",
+                )
             ]
 
             if any(counts):
@@ -168,6 +243,7 @@ class Store:
                 drivers,
                 start=1,
             ):
+
                 vehicle = f"VEH-{index:03}"
                 route = f"Route {index}"
 
@@ -176,7 +252,11 @@ class Store:
                     INSERT INTO drivers(name, license, phone)
                     VALUES (?, ?, ?)
                     """,
-                    (name, license_number, phone),
+                    (
+                        name,
+                        license_number,
+                        phone,
+                    ),
                 )
 
                 db.execute(
@@ -184,7 +264,10 @@ class Store:
                     INSERT INTO vehicles(registration, model)
                     VALUES (?, ?)
                     """,
-                    (vehicle, "Lab vehicle"),
+                    (
+                        vehicle,
+                        "Lab vehicle",
+                    ),
                 )
 
                 db.execute(
@@ -192,14 +275,23 @@ class Store:
                     INSERT INTO routes(name, origin, destination)
                     VALUES (?, ?, ?)
                     """,
-                    ("Route " + str(index), "Depot", destinations[index - 1]),
+                    (
+                        route,
+                        "Depot",
+                        destinations[index - 1],
+                    ),
                 )
 
                 db.execute(
                     """
                     INSERT INTO trips(
-                        vehicle_id, driver_id, route_id,
-                        started_at, driver_name, vehicle_name, route_name
+                        vehicle_id,
+                        driver_id,
+                        route_id,
+                        started_at,
+                        driver_name,
+                        vehicle_name,
+                        route_name
                     )
                     VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
@@ -229,6 +321,7 @@ class Store:
         cleaned = []
 
         for field in fields:
+
             value = values.get(field, "")
 
             if not isinstance(value, str):
@@ -250,7 +343,9 @@ class Store:
         record_id = values.get("id")
 
         with self.connection() as db:
+
             if record_id is not None:
+
                 record_id = positive_id(
                     record_id,
                     ENTITY_LABELS[kind],
@@ -270,7 +365,9 @@ class Store:
 
                 return record_id
 
-            placeholders = ", ".join("?" for _ in fields)
+            placeholders = ", ".join(
+                "?" for _ in fields
+            )
 
             cursor = db.execute(
                 f"""
@@ -288,7 +385,10 @@ class Store:
         if kind not in ENTITY_FIELDS:
             raise ValueError("Unknown record type.")
 
-        record_id = positive_id(record_id, ENTITY_LABELS[kind])
+        record_id = positive_id(
+            record_id,
+            ENTITY_LABELS[kind],
+        )
 
         reference = {
             "drivers": "driver_id",
@@ -297,6 +397,7 @@ class Store:
         }[kind]
 
         with self.connection() as db:
+
             used = db.execute(
                 f"""
                 SELECT 1 FROM trips
@@ -330,6 +431,7 @@ class Store:
         route_id = positive_id(route_id, "route")
 
         with self.connection() as db:
+
             db.execute("BEGIN IMMEDIATE")
 
             vehicle = db.execute(
@@ -373,14 +475,22 @@ class Store:
                 UPDATE trips SET ended_at=?
                 WHERE vehicle_id=? AND ended_at IS NULL
                 """,
-                (now, vehicle_id),
+                (
+                    now,
+                    vehicle_id,
+                ),
             )
 
             cursor = db.execute(
                 """
                 INSERT INTO trips(
-                    vehicle_id, driver_id, route_id,
-                    started_at, driver_name, vehicle_name, route_name
+                    vehicle_id,
+                    driver_id,
+                    route_id,
+                    started_at,
+                    driver_name,
+                    vehicle_name,
+                    route_name
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -400,15 +510,22 @@ class Store:
     def end_trip(self, trip_id):
         """End an active trip."""
 
-        trip_id = positive_id(trip_id, "trip")
+        trip_id = positive_id(
+            trip_id,
+            "trip",
+        )
 
         with self.connection() as db:
+
             cursor = db.execute(
                 """
                 UPDATE trips SET ended_at=?
                 WHERE id=? AND ended_at IS NULL
                 """,
-                (utc_now(), trip_id),
+                (
+                    utc_now(),
+                    trip_id,
+                ),
             )
 
             if not cursor.rowcount:
@@ -419,9 +536,13 @@ class Store:
     def assignment(self, vehicle_id):
         """Return a vehicle's active trip."""
 
-        vehicle_id = positive_id(vehicle_id, "vehicle")
+        vehicle_id = positive_id(
+            vehicle_id,
+            "vehicle",
+        )
 
         with self.connection() as db:
+
             row = db.execute(
                 """
                 SELECT * FROM trips
@@ -454,7 +575,11 @@ class Store:
 
         sample_id = sample["id"]
 
-        if not isinstance(sample_id, str) or not sample_id.strip():
+        if (
+            not isinstance(sample_id, str)
+            or not sample_id.strip()
+            or len(sample_id) > 128
+        ):
             raise ValueError("Invalid sample ID.")
 
         risk = sample["risk"]
@@ -467,22 +592,32 @@ class Store:
             raise ValueError("Invalid sensor readings.")
 
         try:
-            trip_id = positive_id(sample["trip_id"], "trip")
-            vehicle_id = positive_id(sample["vehicle_id"], "vehicle")
+            trip_id = positive_id(
+                sample["trip_id"],
+                "trip",
+            )
 
-            score_value = risk["score"]
+            vehicle_id = positive_id(
+                sample["vehicle_id"],
+                "vehicle",
+            )
 
-            if isinstance(score_value, bool):
-                raise ValueError("Invalid risk score.")
-
-            score = int(score_value)
-
-            if score < 0:
-                raise ValueError("Invalid risk score.")
+            score = non_negative_integer(
+                risk["score"],
+                "risk score",
+            )
 
             level = risk["level"]
             reason = risk["reason"]
-            captured_at = sample["captured_at"]
+
+            captured_datetime = parse_timestamp(
+                sample["captured_at"],
+                "sample timestamp",
+            )
+
+            captured_at = captured_datetime.isoformat(
+                timespec="milliseconds"
+            )
 
             if not isinstance(level, str) or not level.strip():
                 raise ValueError("Invalid risk level.")
@@ -490,17 +625,24 @@ class Store:
             if not isinstance(reason, str):
                 raise ValueError("Invalid risk reason.")
 
-            if not isinstance(captured_at, str) or not captured_at.strip():
-                raise ValueError("Invalid sample timestamp.")
+            readings_json = json.dumps(
+                readings,
+                allow_nan=False,
+            )
 
-            readings_json = json.dumps(readings, allow_nan=False)
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+            OverflowError,
+        ) as error:
 
-        except (KeyError, TypeError, ValueError, OverflowError) as error:
             raise ValueError(
                 "Invalid sample or risk assessment values."
             ) from error
 
         with self.connection() as db:
+
             db.execute("BEGIN IMMEDIATE")
 
             trip = db.execute(
@@ -513,17 +655,29 @@ class Store:
                     "Sample does not belong to this vehicle's trip."
                 )
 
-            if (
-                captured_at < trip["started_at"]
-                or (
-                    trip["ended_at"]
-                    and captured_at > trip["ended_at"]
-                )
-            ):
+            trip_started = parse_timestamp(
+                trip["started_at"],
+                "trip start timestamp",
+            )
+
+            if captured_datetime < trip_started:
                 raise ValueError(
                     "Sample falls outside its trip. "
                     "Refresh the assignment."
                 )
+
+            if trip["ended_at"]:
+
+                trip_ended = parse_timestamp(
+                    trip["ended_at"],
+                    "trip end timestamp",
+                )
+
+                if captured_datetime > trip_ended:
+                    raise ValueError(
+                        "Sample falls outside its trip. "
+                        "Refresh the assignment."
+                    )
 
             previous = db.execute(
                 """
@@ -538,8 +692,14 @@ class Store:
             cursor = db.execute(
                 """
                 INSERT OR IGNORE INTO samples(
-                    id, trip_id, captured_at, received_at,
-                    score, level, reason, readings
+                    id,
+                    trip_id,
+                    captured_at,
+                    received_at,
+                    score,
+                    level,
+                    reason,
+                    readings
                 )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
@@ -558,22 +718,35 @@ class Store:
             if not cursor.rowcount:
                 return
 
-            is_newest = (
-                previous is None
-                or captured_at > previous["captured_at"]
-            )
+            if previous is None:
+                is_newest = True
+                changed_level = True
 
-            changed_level = (
-                previous is None
-                or previous["level"] != level
-            )
+            else:
+                previous_datetime = parse_timestamp(
+                    previous["captured_at"],
+                    "previous sample timestamp",
+                )
+
+                is_newest = (
+                    captured_datetime > previous_datetime
+                )
+
+                changed_level = (
+                    previous["level"] != level
+                )
 
             if is_newest and changed_level:
+
                 db.execute(
                     """
                     INSERT INTO events(
-                        sample_id, trip_id, captured_at,
-                        level, score, reason
+                        sample_id,
+                        trip_id,
+                        captured_at,
+                        level,
+                        score,
+                        reason
                     )
                     VALUES (?, ?, ?, ?, ?, ?)
                     """,
@@ -593,6 +766,7 @@ class Store:
         """Return entities, trips, and each active vehicle's latest sample."""
 
         with self.connection() as db:
+
             result = {
                 table: [
                     dict(row)
@@ -619,7 +793,9 @@ class Store:
             }
 
             for vehicle in result["vehicles"]:
+
                 trip = active.get(vehicle["id"])
+
                 vehicle["trip"] = trip
                 vehicle["sample"] = None
 
@@ -637,11 +813,18 @@ class Store:
                 ).fetchone()
 
                 if row:
+
                     sample = dict(row)
 
                     try:
-                        sample["readings"] = json.loads(row["readings"])
-                    except (ValueError, TypeError):
+                        sample["readings"] = json.loads(
+                            row["readings"]
+                        )
+
+                    except (
+                        ValueError,
+                        TypeError,
+                    ):
                         sample["readings"] = {}
 
                     vehicle["sample"] = sample
@@ -662,11 +845,15 @@ class Store:
         """Return filtered risk transition events."""
 
         try:
-            limit = int(limit)
-        except (TypeError, ValueError, OverflowError):
+            limit = positive_id(
+                limit,
+                "log limit",
+            )
+
+        except ValueError:
             raise ValueError("Invalid log limit.") from None
 
-        limit = max(1, min(limit, 1000))
+        limit = min(limit, 1000)
 
         sql = """
             SELECT
@@ -690,20 +877,34 @@ class Store:
         )
 
         for field, value, label in filters:
+
             if value in (None, "", "ALL"):
                 continue
 
             if label:
-                value = positive_id(value, label)
+                value = positive_id(
+                    value,
+                    label,
+                )
 
             sql += f" AND {field}=?"
             args.append(value)
 
         if since:
+            since = normalize_timestamp(
+                since,
+                "start date",
+            )
+
             sql += " AND e.captured_at>=?"
             args.append(since)
 
         if until:
+            until = normalize_timestamp(
+                until,
+                "end date",
+            )
+
             sql += " AND e.captured_at<=?"
             args.append(until)
 
@@ -715,7 +916,11 @@ class Store:
         args.append(limit)
 
         with self.connection() as db:
+
             return [
                 dict(row)
-                for row in db.execute(sql, args)
+                for row in db.execute(
+                    sql,
+                    args,
+                )
             ]

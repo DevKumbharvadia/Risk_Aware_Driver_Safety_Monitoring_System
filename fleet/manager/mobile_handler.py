@@ -2,7 +2,6 @@
 """HTTP endpoints for the smartphone browser."""
 
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler
 import json
 import logging
 import time
@@ -23,6 +22,8 @@ class MobileHandler(PhoneHandler):
     """Serve mobile assets and handle authenticated phone requests."""
 
     def _stopping(self):
+        """Check whether the server is shutting down."""
+
         return self.server.stopping.is_set()
 
     def _get_vehicle_link(self):
@@ -56,9 +57,15 @@ class MobileHandler(PhoneHandler):
             return None
 
         try:
-            asset_path = (MOBILE_ROOT / decoded_path.lstrip("/")).resolve()
-            asset_path.relative_to(MOBILE_ROOT.resolve())
-        except (ValueError, OSError):
+            root = MOBILE_ROOT.resolve()
+
+            asset_path = (
+                root / decoded_path.lstrip("/")
+            ).resolve()
+
+            asset_path.relative_to(root)
+
+        except (ValueError, OSError, RuntimeError):
             return None
 
         if not asset_path.is_file():
@@ -69,31 +76,64 @@ class MobileHandler(PhoneHandler):
             ".js": "text/javascript; charset=utf-8",
         }
 
-        content_type = content_types.get(asset_path.suffix.lower())
+        content_type = content_types.get(
+            asset_path.suffix.lower()
+        )
 
-        return (asset_path, content_type) if content_type else None
+        if content_type is None:
+            return None
+
+        return asset_path, content_type
 
     def do_GET(self):
+        """Handle mobile page, asset, model, and status requests."""
+
         if self._stopping():
-            return self.respond(503, b"Fleet Guardian is shutting down.")
+            return self.respond(
+                503,
+                b"Fleet Guardian is shutting down.",
+            )
 
         path = urlsplit(self.path).path
+
+        # -------------------------------------------------------------
+        # CSS and JavaScript assets
+        # -------------------------------------------------------------
 
         if path.startswith(("/css/", "/js/")):
             asset = self._static_asset(path)
 
             if asset is None:
-                return self.respond(404, b"Mobile application asset not found.")
+                return self.respond(
+                    404,
+                    b"Mobile application asset not found.",
+                )
 
             asset_path, content_type = asset
 
             try:
                 content = asset_path.read_bytes()
-            except OSError:
-                logging.exception("Unable to read mobile asset: %s", asset_path)
-                return self.respond(500, b"Unable to read mobile application asset.")
 
-            return self.respond(200, content, content_type)
+            except OSError:
+                logging.exception(
+                    "Unable to read mobile asset: %s",
+                    asset_path,
+                )
+
+                return self.respond(
+                    500,
+                    b"Unable to read mobile application asset.",
+                )
+
+            return self.respond(
+                200,
+                content,
+                content_type,
+            )
+
+        # -------------------------------------------------------------
+        # Preview control
+        # -------------------------------------------------------------
 
         if path == "/preview-control":
             link = self._get_vehicle_link()
@@ -109,11 +149,20 @@ class MobileHandler(PhoneHandler):
 
             payload = json.dumps({
                 "enabled": bool(
-                    trip and fleet.preview_is_selected(link.session_id)
+                    trip
+                    and fleet.preview_is_selected(link.session_id)
                 ),
             }).encode("utf-8")
 
-            return self.respond(200, payload, "application/json")
+            return self.respond(
+                200,
+                payload,
+                "application/json",
+            )
+
+        # -------------------------------------------------------------
+        # Server version
+        # -------------------------------------------------------------
 
         if path == "/version":
             return self.respond(
@@ -122,50 +171,124 @@ class MobileHandler(PhoneHandler):
                 "application/json",
             )
 
+        # -------------------------------------------------------------
+        # Server clock
+        # -------------------------------------------------------------
+
         if path == "/clock":
             payload = json.dumps({
                 "monotonic": time.monotonic(),
             }).encode("utf-8")
 
-            return self.respond(200, payload, "application/json")
+            return self.respond(
+                200,
+                payload,
+                "application/json",
+            )
+
+        # -------------------------------------------------------------
+        # Browser ONNX model
+        # -------------------------------------------------------------
 
         if path == "/models/driver_mobilenetv3_small.onnx":
-            if not MOBILE_MODEL.is_file():
-                logging.error("ONNX model file not found: %s", MOBILE_MODEL)
-                return self.respond(
-                    404,
-                    b"ONNX model not found. Check the models directory.",
-                )
 
             try:
-                model = MOBILE_MODEL.read_bytes()
-            except OSError:
-                logging.exception("Unable to read ONNX model")
-                return self.respond(500, b"Unable to read ONNX model.")
+                if not MOBILE_MODEL.is_file():
+                    logging.error(
+                        "ONNX model file not found: %s",
+                        MOBILE_MODEL,
+                    )
 
-            return self.respond(200, model, "application/octet-stream")
+                    return self.respond(
+                        404,
+                        b"ONNX model not found. Check the models directory.",
+                    )
+
+                model = MOBILE_MODEL.read_bytes()
+
+                if not model:
+                    logging.error(
+                        "ONNX model file is empty: %s",
+                        MOBILE_MODEL,
+                    )
+
+                    return self.respond(
+                        500,
+                        b"ONNX model file is empty.",
+                    )
+
+            except OSError:
+                logging.exception(
+                    "Unable to read ONNX model: %s",
+                    MOBILE_MODEL,
+                )
+
+                return self.respond(
+                    500,
+                    b"Unable to read ONNX model.",
+                )
+
+            return self.respond(
+                200,
+                model,
+                "application/octet-stream",
+            )
+
+        # -------------------------------------------------------------
+        # Mobile application page
+        # -------------------------------------------------------------
 
         if path not in ("/", "/index.html"):
-            return self.respond(404, b"Unknown page")
+            return self.respond(
+                404,
+                b"Unknown page",
+            )
 
         try:
             page = MOBILE_PAGE.read_bytes()
-        except OSError:
-            logging.exception("Could not read the mobile page")
-            return self.respond(500, b"Mobile page unavailable.")
 
-        return self.respond(200, page, "text/html; charset=utf-8")
+            if not page:
+                return self.respond(
+                    500,
+                    b"Mobile page is empty.",
+                )
+
+        except OSError:
+            logging.exception(
+                "Could not read the mobile page: %s",
+                MOBILE_PAGE,
+            )
+
+            return self.respond(
+                500,
+                b"Mobile page unavailable.",
+            )
+
+        return self.respond(
+            200,
+            page,
+            "text/html; charset=utf-8",
+        )
 
     def do_POST(self):
+        """Handle authenticated phone prediction and preview requests."""
+
         if self._stopping():
-            return self.respond(503, b"Fleet Guardian is shutting down.")
+            return self.respond(
+                503,
+                b"Fleet Guardian is shutting down.",
+            )
 
         try:
             path = urlsplit(self.path).path
 
             if path not in ("/prediction", "/preview"):
-                return self.respond(404, b"Unknown endpoint")
+                return self.respond(
+                    404,
+                    b"Unknown endpoint",
+                )
 
+            # Authenticate the phone session.
             link = self._get_vehicle_link()
 
             if not link:
@@ -174,38 +297,72 @@ class MobileHandler(PhoneHandler):
                     b"Open the current vehicle link from the manager PC.",
                 )
 
+            # Validate Content-Length.
+            content_length = self.headers.get("Content-Length")
+
+            if content_length is None:
+                raise ValueError(
+                    "Missing Content-Length header."
+                )
+
             try:
-                size = int(self.headers.get("Content-Length", ""))
+                size = int(content_length)
+
             except (ValueError, TypeError):
-                raise ValueError("Invalid request size")
+                raise ValueError(
+                    "Invalid request size."
+                ) from None
 
             maximum = (
-                MAX_PREVIEW_BYTES if path == "/preview"
+                MAX_PREVIEW_BYTES
+                if path == "/preview"
                 else MAX_PREDICTION_BYTES
             )
 
-            if not 0 < size <= maximum:
-                raise ValueError("Invalid request size")
+            if size <= 0 or size > maximum:
+                raise ValueError(
+                    "Invalid request size."
+                )
 
+            # Read the request body with a timeout.
             self.connection.settimeout(5)
+
             body = self.rfile.read(size)
 
             if len(body) != size:
-                raise ValueError("Incomplete phone request")
+                raise ValueError(
+                    "Incomplete phone request."
+                )
 
             if self._stopping():
-                return self.respond(503, b"Fleet Guardian is shutting down.")
+                return self.respond(
+                    503,
+                    b"Fleet Guardian is shutting down.",
+                )
 
+            # Dispatch the request.
             if path == "/preview":
-                return self._handle_preview(link, body)
+                return self._handle_preview(
+                    link,
+                    body,
+                )
 
-            return self._handle_prediction(link, body)
+            return self._handle_prediction(
+                link,
+                body,
+            )
 
         except TimeoutError as error:
-            logging.warning("Phone request timed out: %s", error)
+            logging.warning(
+                "Phone request timed out: %s",
+                error,
+            )
 
             if not self._stopping():
-                return self.respond(408, str(error).encode("utf-8"))
+                return self.respond(
+                    408,
+                    str(error).encode("utf-8"),
+                )
 
         except (
             ValueError,
@@ -214,18 +371,38 @@ class MobileHandler(PhoneHandler):
             OSError,
             OverflowError,
         ) as error:
+
             if not self._stopping():
-                logging.warning("Phone request rejected: %s", error)
-                return self.respond(400, str(error).encode("utf-8"))
+                logging.warning(
+                    "Phone request rejected: %s",
+                    error,
+                )
+
+                return self.respond(
+                    400,
+                    str(error).encode("utf-8"),
+                )
 
         except RuntimeError as error:
+
             if not self._stopping():
-                logging.info("Phone request ended: %s", error)
-                return self.respond(503, str(error).encode("utf-8"))
+                logging.info(
+                    "Phone request ended: %s",
+                    error,
+                )
+
+                return self.respond(
+                    503,
+                    str(error).encode("utf-8"),
+                )
 
         except Exception:
+
             if not self._stopping():
-                logging.exception("Phone prediction or preview request failed")
+                logging.exception(
+                    "Phone prediction or preview request failed"
+                )
+
                 return self.respond(
                     500,
                     b"Prediction or fleet service unavailable. Check PC setup.",
@@ -245,25 +422,47 @@ class MobileHandler(PhoneHandler):
         trip = fleet.store.assignment(link.vehicle)
 
         if not trip or str(trip["id"]) != self.headers.get("X-Trip"):
-            raise ValueError("Trip changed")
+            raise ValueError(
+                "Trip changed."
+            )
 
-        if not body.startswith(b"\xff\xd8") or not body.endswith(b"\xff\xd9"):
-            raise ValueError("Invalid JPEG preview")
+        # Validate JPEG boundaries.
+        if (
+            len(body) < 4
+            or not body.startswith(b"\xff\xd8")
+            or not body.endswith(b"\xff\xd9")
+        ):
+            raise ValueError(
+                "Invalid JPEG preview."
+            )
 
+        # Retrieve the latest prediction overlay.
         assessed_trip, assessed_at, level = link.overlay
+
+        overlay_age = time.monotonic() - assessed_at
 
         if (
             assessed_trip != trip["id"]
-            or time.monotonic() - assessed_at > PREDICTION_STALE_OVERLAY
+            or overlay_age < 0
+            or overlay_age > PREDICTION_STALE_OVERLAY
         ):
             level = "UNKNOWN"
 
-        annotated, box = link.tracker.annotate(body, level)
+        # Annotate the preview.
+        annotated, box = link.tracker.annotate(
+            body,
+            level,
+        )
 
         if self._stopping():
-            return self.respond(503, b"Fleet Guardian is shutting down.")
+            return self.respond(
+                503,
+                b"Fleet Guardian is shutting down.",
+            )
 
+        # Store the frame only if the trip and selection remain valid.
         with fleet.frame_lock:
+
             if not fleet.preview_is_selected(link.session_id):
                 return self.respond(
                     403,
@@ -272,7 +471,10 @@ class MobileHandler(PhoneHandler):
 
             current_trip = fleet.store.assignment(link.vehicle)
 
-            if not current_trip or current_trip["id"] != trip["id"]:
+            if (
+                not current_trip
+                or current_trip["id"] != trip["id"]
+            ):
                 return self.respond(
                     409,
                     b"Vehicle trip changed during preview upload.",
@@ -289,18 +491,27 @@ class MobileHandler(PhoneHandler):
             "level": level,
         }).encode("utf-8")
 
-        return self.respond(200, payload, "application/json")
+        return self.respond(
+            200,
+            payload,
+            "application/json",
+        )
 
     def _handle_prediction(self, link, body):
         """Decode and process a phone prediction."""
 
         try:
             data = json.loads(body)
+
         except (json.JSONDecodeError, UnicodeDecodeError):
-            raise ValueError("Invalid JSON prediction payload")
+            raise ValueError(
+                "Invalid JSON prediction payload."
+            ) from None
 
         if not isinstance(data, dict):
-            raise ValueError("Prediction must be a JSON object")
+            raise ValueError(
+                "Prediction must be a JSON object."
+            )
 
         result = link.receive_prediction(
             self.server.fleet,
@@ -311,8 +522,10 @@ class MobileHandler(PhoneHandler):
         if self._stopping():
             return None
 
+        payload = json.dumps(result).encode("utf-8")
+
         return self.respond(
             200,
-            json.dumps(result).encode("utf-8"),
+            payload,
             "application/json",
         )

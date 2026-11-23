@@ -63,22 +63,28 @@ h1 {
 
 .metrics {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 20px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0;
+    padding: 18px 14px;
     border: 1px solid var(--border);
     border-radius: 20px;
     background: #17262d;
 }
 
+.metrics > div {
+    min-width: 0;
+}
+
 .metrics > div + div {
-    padding-left: 20px;
+    padding-left: 12px;
+    margin-left: 12px;
     border-left: 1px solid var(--border);
 }
 
 .label {
     display: block;
     color: var(--muted);
-    font-size: .78rem;
+    font-size: .72rem;
     font-weight: 650;
     text-transform: uppercase;
 }
@@ -86,7 +92,8 @@ h1 {
 .value {
     display: block;
     margin-top: 8px;
-    font-size: 1.8rem;
+    font-size: clamp(1.1rem, 5vw, 1.65rem);
+    overflow-wrap: anywhere;
 }
 
 .value small {
@@ -94,19 +101,23 @@ h1 {
     font-size: .75rem;
 }
 
-#risk[data-level="LOW"] {
+#risk[data-level="LOW"],
+#drowsiness[data-level="NORMAL"] {
     color: var(--green);
 }
 
-#risk[data-level="CAUTION"] {
+#risk[data-level="CAUTION"],
+#drowsiness[data-level="WARNING"] {
     color: var(--yellow);
 }
 
-#risk[data-level="HIGH"] {
+#risk[data-level="HIGH"],
+#drowsiness[data-level="CRITICAL"] {
     color: var(--red);
 }
 
-#risk[data-level="UNKNOWN"] {
+#risk[data-level="UNKNOWN"],
+#drowsiness[data-level="UNKNOWN"] {
     color: var(--muted);
 }
 
@@ -293,21 +304,26 @@ button:disabled {
     margin-top: 9px;
 }
 
-@media(max-width: 380px) {
+@media (max-width: 380px) {
     body {
         width: min(100% - 24px, 520px);
         padding-top: 15px;
     }
 
     .metrics {
-        padding: 16px;
+        padding: 14px 10px;
     }
 
     .metrics > div + div {
-        padding-left: 13px;
+        padding-left: 8px;
+        margin-left: 8px;
+    }
+
+    .label {
+        font-size: .65rem;
     }
 
     .value {
-        font-size: 1.55rem;
+        font-size: 1.1rem;
     }
 }

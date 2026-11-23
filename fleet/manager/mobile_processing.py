@@ -7,6 +7,52 @@ import time
 from ..mobile.phone_speed import PhoneSpeed
 
 
+# ---------------------------------------------------------------------
+# Behaviour labels
+# ---------------------------------------------------------------------
+
+BEHAVIOR_LABELS = {
+    "texting_phone": "PHONE USE",
+    "texting": "PHONE USE",
+
+    "talking_phone": "PHONE USE",
+    "talking_on_phone": "PHONE USE",
+
+    "drinking": "DRINKING",
+    "reaching_behind": "REACHING BEHIND",
+
+    "turning": "TURNING",
+
+    "safe_driving": "SAFE DRIVING",
+    "safe": "SAFE DRIVING",
+
+    "other_activities": "OTHER ACTIVITIES",
+    "unconfirmed_activity": "UNCONFIRMED ACTIVITY",
+    "possible_call": "POSSIBLE CALL",
+}
+
+
+CLASSIFIER_NAMES = {
+    "texting_phone": "Texting on phone",
+    "texting": "Texting",
+
+    "talking_phone": "Talking on phone",
+    "talking_on_phone": "Talking on phone",
+
+    "drinking": "Drinking",
+    "reaching_behind": "Reaching behind",
+
+    "turning": "Turning",
+
+    "safe_driving": "Safe driving",
+    "safe": "Safe driving",
+
+    "other_activities": "Other activities",
+    "unconfirmed_activity": "Unconfirmed activity",
+    "possible_call": "Possible call",
+}
+
+
 def behavior_label(
     behavior,
     confidence,
@@ -15,25 +61,22 @@ def behavior_label(
 ):
     """Convert predicted behaviour into a dashboard label."""
 
-    behavior = behavior.strip().lower() if isinstance(behavior, str) else ""
+    if not isinstance(behavior, str):
+        behavior = ""
 
-    labels = {
-        "texting_phone": "PHONE USE",
-        "talking_phone": "PHONE USE",
-        "turning": "TURNING",
-        "safe_driving": "SAFE DRIVING",
-        "other_activities": "OTHER ACTIVITIES",
-        "unconfirmed_activity": "UNCONFIRMED ACTIVITY",
-        "possible_call": "POSSIBLE CALL",
-    }
+    behavior = behavior.strip().lower()
 
-    if behavior in labels:
-        return labels[behavior]
+    if behavior in BEHAVIOR_LABELS:
+        return BEHAVIOR_LABELS[behavior]
 
     if handset_visible is True:
         return "PHONE USE"
 
-    return behavior.replace("_", " ").upper() if behavior else "UNKNOWN"
+    return (
+        behavior.replace("_", " ").upper()
+        if behavior
+        else "UNKNOWN"
+    )
 
 
 def classifier_summary(label, score, handset_visible):
@@ -44,19 +87,18 @@ def classifier_summary(label, score, handset_visible):
 
     label = str(label).strip().lower()
 
-    names = {
-        "texting_phone": "Texting on phone",
-        "talking_phone": "Talking on phone",
-        "turning": "Turning",
-        "safe_driving": "Safe driving",
-        "other_activities": "Other activities",
-    }
+    if not label:
+        return "No prediction"
 
-    description = names.get(label, label.replace("_", " ").title())
+    description = CLASSIFIER_NAMES.get(
+        label,
+        label.replace("_", " ").title(),
+    )
 
     try:
         score = float(score)
-    except (TypeError, ValueError):
+
+    except (TypeError, ValueError, OverflowError):
         return description
 
     if not math.isfinite(score):
@@ -65,6 +107,10 @@ def classifier_summary(label, score, handset_visible):
     return f"{description} ({score:.1%})"
 
 
+# ---------------------------------------------------------------------
+# Preview processing
+# ---------------------------------------------------------------------
+
 class PreviewTracker:
     """Pass through JPEG previews without face detection."""
 
@@ -72,73 +118,125 @@ class PreviewTracker:
         return image_bytes, None
 
 
+# ---------------------------------------------------------------------
+# GPS processing
+# ---------------------------------------------------------------------
+
 def apply_vehicle_speed(readings, data):
     """Apply validated phone GPS data to Measurements."""
 
     gps = PhoneSpeed()
     fix = {}
 
-    if data.get("gps"):
-        try:
-            fix = data["gps"]
+    if not isinstance(data, dict):
+        data = {}
 
-            if not isinstance(fix, dict):
+    gps_data = data.get("gps")
+
+    if gps_data:
+        try:
+            if not isinstance(gps_data, dict):
                 raise ValueError("Invalid GPS object")
 
             captured = data.get("captured")
             server_capture = data.get("server_capture")
-            gps_timestamp = fix.get("timestamp")
+            gps_timestamp = gps_data.get("timestamp")
 
-            timestamps = (captured, server_capture, gps_timestamp)
+            timestamps = (
+                captured,
+                server_capture,
+                gps_timestamp,
+            )
 
             if any(
-                not isinstance(value, (int, float))
-                or isinstance(value, bool)
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
                 or not math.isfinite(value)
                 for value in timestamps
             ):
-                raise ValueError("Invalid GPS capture timestamp")
+                raise ValueError(
+                    "Invalid GPS capture timestamp"
+                )
 
             gps_age = captured - gps_timestamp
+
+            if gps_age < -2.0 or gps_age > 30.0:
+                raise ValueError(
+                    "GPS reading is outside the accepted time window"
+                )
+
             adjusted_timestamp = (
                 time.time()
                 - gps_age
-                - max(0.0, time.monotonic() - server_capture)
+                - max(
+                    0.0,
+                    time.monotonic() - server_capture,
+                )
             )
 
-            gps.accept({
-                **fix,
+            validated_fix = {
+                **gps_data,
                 "timestamp": adjusted_timestamp,
-            })
+            }
 
-        except (ValueError, KeyError, TypeError, OverflowError):
+            gps.accept(validated_fix)
+
+            fix = validated_fix
+
+        except (
+            ValueError,
+            KeyError,
+            TypeError,
+            OverflowError,
+        ):
             fix = {}
 
+    # Apply GPS information to vehicle measurements.
     gps.apply(readings)
 
-    missing = readings.assessment_note.startswith(
-        ("Phone GPS", "Waiting for phone GPS")
+    # Determine whether usable GPS speed is available.
+    assessment_note = getattr(
+        readings,
+        "assessment_note",
+        "",
+    )
+
+    if not isinstance(assessment_note, str):
+        assessment_note = ""
+
+    missing = assessment_note.startswith(
+        (
+            "Phone GPS",
+            "Waiting for phone GPS",
+        )
     )
 
     readings.speed_method = (
         "unavailable"
         if missing
-        else "GPS estimate" if fix.get("estimated") else "GPS"
+        else "GPS estimate"
+        if fix.get("estimated")
+        else "GPS"
     )
 
+    # Provide useful messages when GPS is unavailable.
     if missing:
+
         messages = {
             "denied": (
                 "Allow precise location for this site "
                 "in the phone browser."
             ),
+
             "timeout": (
                 "GPS timed out. Try outdoors with precise "
                 "location enabled."
             ),
+
             "unavailable": (
                 "Location unavailable. Check phone location settings."
             ),
+
             "estimating": (
                 "Waiting for sufficiently accurate movement "
                 "to estimate speed."
@@ -147,5 +245,5 @@ def apply_vehicle_speed(readings, data):
 
         readings.assessment_note = messages.get(
             data.get("gps_status"),
-            readings.assessment_note,
+            assessment_note,
         )

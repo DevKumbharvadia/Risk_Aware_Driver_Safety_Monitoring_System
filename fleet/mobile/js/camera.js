@@ -59,6 +59,7 @@ function makePreviewBlob() {
     });
 }
 
+
 /* Check whether manager is viewing this phone */
 
 async function checkPreviewSelection() {
@@ -98,6 +99,7 @@ async function checkPreviewSelection() {
             : "Private";
 }
 
+
 /* Upload one camera frame */
 
 async function uploadPreview() {
@@ -114,6 +116,8 @@ async function uploadPreview() {
 
     previewBusy = true;
 
+    const tripId = activeTripId;
+
     try {
 
         const blob = await makePreviewBlob();
@@ -121,7 +125,8 @@ async function uploadPreview() {
         if (
             !blob ||
             !running ||
-            !previewEnabled
+            !previewEnabled ||
+            activeTripId !== tripId
         ) {
             return;
         }
@@ -143,7 +148,7 @@ async function uploadPreview() {
                 headers: {
                     ...authHeaders(false),
 
-                    "X-Trip": String(activeTripId),
+                    "X-Trip": String(tripId),
 
                     "Content-Type": "image/jpeg"
                 },
@@ -175,6 +180,7 @@ async function uploadPreview() {
     }
 }
 
+
 /* 12 FPS preview scheduler */
 
 async function previewLoop() {
@@ -186,6 +192,7 @@ async function previewLoop() {
     const started = performance.now();
 
     // Check manager permission once per second.
+
     if (
         !lastPreviewControlCheck ||
         started - lastPreviewControlCheck >=
@@ -222,6 +229,7 @@ async function previewLoop() {
     }
 }
 
+
 /* Stop camera preview transmission */
 
 function stopPreview() {
@@ -231,8 +239,6 @@ function stopPreview() {
     previewTimer = null;
 
     previewEnabled = false;
-
-    previewBusy = false;
 
     lastPreviewControlCheck = 0;
 

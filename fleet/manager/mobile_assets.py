@@ -10,45 +10,83 @@ from .mobile_config import (
     MOBILE_MODEL,
 )
 
+# Required browser JavaScript files.
+REQUIRED_JS_FILES = (
+    "config.js",
+    "ui.js",
+    "sensors.js",
+    "camera.js",
+    "drowsiness.js",
+    "inference.js",
+    "main.js",
+)
 
-def validate_mobile_assets():
-    """Check that all browser assets and the ONNX model exist."""
 
-    required_files = (
-        MOBILE_PAGE,
-        MOBILE_CSS / "mobile.css",
-        MOBILE_JS / "config.js",
-        MOBILE_JS / "ui.js",
-        MOBILE_JS / "sensors.js",
-        MOBILE_JS / "camera.js",
-        MOBILE_JS / "inference.js",
-        MOBILE_JS / "main.js",
-    )
+def _validate_file(path, description):
+    """Validate that a required file exists and is not empty."""
 
-    missing = [path for path in required_files if not path.is_file()]
-
-    if missing:
+    if not path.is_file():
         raise FileNotFoundError(
-            "Required mobile application files are missing:\n"
-            + "\n".join(str(path) for path in missing)
+            f"{description} not found: {path}"
         )
 
-    if not MOBILE_MODEL.is_file():
-        raise FileNotFoundError(
-            f"ONNX model not found: {MOBILE_MODEL}\n"
-            "Place driver_mobilenetv3_small.onnx in the models directory."
+    if path.stat().st_size <= 0:
+        raise ValueError(
+            f"{description} is empty: {path}"
+        )
+
+
+def validate_mobile_assets():
+    """Check that all browser assets and required models exist."""
+
+    required_files = (
+        (MOBILE_PAGE, "Mobile HTML page"),
+        (MOBILE_CSS / "mobile.css", "Mobile CSS"),
+        *((MOBILE_JS / filename, f"Mobile JavaScript ({filename})")
+          for filename in REQUIRED_JS_FILES),
+    )
+
+    # Validate HTML, CSS, and JavaScript files.
+    for path, description in required_files:
+        _validate_file(path, description)
+
+    # Validate the behaviour classification model.
+    _validate_file(
+        MOBILE_MODEL,
+        "Browser ONNX behaviour model",
+    )
+
+    # Validate the face-landmarker model if configured.
+    face_model = MOBILE_MODEL.parent / "face_landmarker.task"
+
+    if face_model.exists():
+        _validate_file(
+            face_model,
+            "Face landmarker model",
+        )
+    else:
+        logging.warning(
+            "Face landmarker model not found: %s",
+            face_model,
         )
 
     model_size = MOBILE_MODEL.stat().st_size
 
-    if model_size <= 0:
-        raise ValueError(f"ONNX model file is empty: {MOBILE_MODEL}")
-
     logging.info("Mobile page: %s", MOBILE_PAGE)
     logging.info("Mobile CSS: %s", MOBILE_CSS)
     logging.info("Mobile JavaScript: %s", MOBILE_JS)
+
     logging.info(
         "Browser ONNX model: %s (%.2f MB)",
         MOBILE_MODEL,
         model_size / (1024 * 1024),
     )
+
+    if face_model.is_file():
+        logging.info(
+            "Face landmarker model: %s (%.2f MB)",
+            face_model,
+            face_model.stat().st_size / (1024 * 1024),
+        )
+
+    logging.info("Mobile application assets validated successfully.")

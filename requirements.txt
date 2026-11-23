@@ -3,6 +3,7 @@
 opencv-python>=4.10,<5
 Pillow>=10.4,<13
 mediapipe==1.0.1
+numpy
 # Local HTTPS certificate generation for the phone sensor terminal.
 cryptography>=43
 # CPU PyTorch/torchvision wheels matching the Colab model export.
