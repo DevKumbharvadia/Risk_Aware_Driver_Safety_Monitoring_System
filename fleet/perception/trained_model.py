@@ -6,40 +6,73 @@ import math
 from ..risk.engine import Measurements
 
 
+# Exact output order of the new nine-class ONNX model.
 CLASS_NAMES = (
-    "other_activities",
     "safe_driving",
-    "talking_phone",
-    "texting_phone",
-    "turning",
+    "texting_right",
+    "talking_phone_right",
+    "texting_left",
+    "talking_phone_left",
+    "operating_radio",
+    "drinking",
+    "reaching_behind",
+    "talking_to_passenger",
 )
 
 DEFAULT_THRESHOLD = 0.45
-PHONE_USE_THRESHOLD = 0.25
 
-PHONE_CLASSES = ("talking_phone", "texting_phone")
+ALERT_LEVELS = (
+    "NORMAL",
+    "WARNING",
+    "CRITICAL",
+    "UNKNOWN",
+)
 
-ALERT_LEVELS = ("NORMAL", "WARNING", "CRITICAL", "UNKNOWN")
 
 BEHAVIOR_NOTES = {
-    "texting_phone": (
-        "Texting behaviour predicted by the browser classifier; "
-        "physical handset presence is not independently confirmed"
-    ),
-    "talking_phone": (
-        "Talking on phone predicted by the browser classifier; "
-        "physical handset presence is not independently confirmed"
-    ),
-    "turning": "Turning behaviour predicted by the browser classifier",
-    "other_activities": (
-        "Other activities predicted; no specific hazard identified"
-    ),
     "safe_driving": "Safe-driving behaviour predicted",
+
+    "texting_right": (
+        "Texting with the right hand predicted; "
+        "physical handset presence is not independently confirmed"
+    ),
+
+    "talking_phone_right": (
+        "Talking on phone with the right hand predicted; "
+        "physical handset presence is not independently confirmed"
+    ),
+
+    "texting_left": (
+        "Texting with the left hand predicted; "
+        "physical handset presence is not independently confirmed"
+    ),
+
+    "talking_phone_left": (
+        "Talking on phone with the left hand predicted; "
+        "physical handset presence is not independently confirmed"
+    ),
+
+    "operating_radio": (
+        "Operating vehicle radio predicted"
+    ),
+
+    "drinking": (
+        "Drinking while driving predicted"
+    ),
+
+    "reaching_behind": (
+        "Reaching behind predicted"
+    ),
+
+    "talking_to_passenger": (
+        "Talking to passenger predicted"
+    ),
 }
 
 
 def _valid_number(value):
     """Check for finite numeric values, excluding booleans."""
+
     return (
         isinstance(value, (int, float))
         and not isinstance(value, bool)
@@ -49,19 +82,23 @@ def _valid_number(value):
 
 def _optional_ratio(data, name):
     """Validate an optional measurement between zero and one."""
+
     value = data.get(name)
 
     if value is None:
         return None
 
     if not _valid_number(value) or not 0 <= value <= 1:
-        raise ValueError(f"Invalid {name} measurement.")
+        raise ValueError(
+            f"Invalid {name} measurement."
+        )
 
     return float(value)
 
 
 def unavailable_readings(note):
     """Create Measurements when no usable prediction is available."""
+
     return Measurements(
         source="trained_model",
         face_visible=None,
@@ -76,7 +113,7 @@ def prediction_to_readings(
     inference_ms=0.0,
     threshold=None,
 ):
-    """Convert a validated ONNX prediction into Measurements."""
+    """Convert a validated nine-class ONNX prediction into Measurements."""
 
     if not isinstance(label, str) or label not in CLASS_NAMES:
         raise ValueError(
@@ -85,19 +122,25 @@ def prediction_to_readings(
         )
 
     if not _valid_number(confidence) or not 0 <= confidence <= 1:
-        raise ValueError("Confidence must be between zero and one.")
-
-    if not _valid_number(inference_ms) or not 0 <= inference_ms <= 600000:
-        raise ValueError("Invalid inference duration.")
-
-    if threshold is None:
-        threshold = (
-            PHONE_USE_THRESHOLD
-            if label in PHONE_CLASSES
-            else DEFAULT_THRESHOLD
+        raise ValueError(
+            "Confidence must be between zero and one."
         )
 
-    if not _valid_number(threshold) or not 0 < threshold <= 1:
+    if (
+        not _valid_number(inference_ms)
+        or not 0 <= inference_ms <= 600000
+    ):
+        raise ValueError(
+            "Invalid inference duration."
+        )
+
+    if threshold is None:
+        threshold = DEFAULT_THRESHOLD
+
+    if (
+        not _valid_number(threshold)
+        or not 0 < threshold <= 1
+    ):
         raise ValueError(
             "Threshold must be greater than zero and at most one."
         )
@@ -112,22 +155,37 @@ def prediction_to_readings(
         source="trained_model",
         face_visible=None,
         assessment_available=True,
-        behavior=label if accepted else "unconfirmed_activity",
+
+        behavior=(
+            label
+            if accepted
+            else "unconfirmed_activity"
+        ),
+
         confidence=confidence,
         inference_ms=inference_ms,
+
         classifier_label=label,
         classifier_score=confidence,
+
         handset_visible=None,
-        phone_use=accepted and label in PHONE_CLASSES,
+
+        # The new classifier's individual behaviour classes
+        # are tracked by RiskEngine using the behaviour label.
+        # Do not also activate the legacy phone_use timer.
+        phone_use=False,
     )
 
     if not accepted:
+
         readings.assessment_note = (
             f"Prediction below confidence threshold "
             f"({confidence:.3f} < {threshold:.3f}); "
             "behaviour is unconfirmed"
         )
+
     else:
+
         readings.assessment_note = BEHAVIOR_NOTES[label]
 
     return readings
@@ -137,7 +195,9 @@ def prediction_from_payload(data, threshold=None):
     """Validate ONNX and independent browser drowsiness measurements."""
 
     if not isinstance(data, dict):
-        raise ValueError("Prediction payload must be an object.")
+        raise ValueError(
+            "Prediction payload must be an object."
+        )
 
     # ---------------------------------------------------------
     # Behaviour classifier prediction
@@ -146,25 +206,39 @@ def prediction_from_payload(data, threshold=None):
     label = data.get("classifier_label")
     confidence = data.get("classifier_score")
 
+    # Prefer the explicit classifier fields.
+    # Fall back to the general behaviour fields for compatibility
+    # with payloads that do not include classifier metadata.
+
     if not isinstance(label, str) or label not in CLASS_NAMES:
+
         label = data.get("behavior")
         confidence = data.get("confidence")
 
-        if not isinstance(label, str) or label not in CLASS_NAMES:
-            raise ValueError(
-                "Prediction payload has no valid behavior/classifier_label."
-            )
-
     elif not _valid_number(confidence):
+
         confidence = data.get("confidence")
 
-    if not _valid_number(confidence):
-        raise ValueError("Prediction payload has no valid confidence.")
+    if not isinstance(label, str) or label not in CLASS_NAMES:
+        raise ValueError(
+            "Prediction payload has no valid nine-class "
+            "behavior/classifier_label."
+        )
 
-    inference_ms = data.get("inference_ms", 0.0)
+    if not _valid_number(confidence):
+        raise ValueError(
+            "Prediction payload has no valid confidence."
+        )
+
+    inference_ms = data.get(
+        "inference_ms",
+        0.0,
+    )
 
     if not _valid_number(inference_ms):
-        raise ValueError("Invalid inference_ms.")
+        raise ValueError(
+            "Invalid inference_ms."
+        )
 
     readings = prediction_to_readings(
         label,
@@ -177,22 +251,40 @@ def prediction_from_payload(data, threshold=None):
     # Browser MediaPipe availability and face detection
     # ---------------------------------------------------------
 
-    available = data.get("drowsiness_available", False)
-    face_detected = data.get("face_detected", False)
-    eyes_closed = data.get("eyes_closed", False)
+    available = data.get(
+        "drowsiness_available",
+        False,
+    )
+
+    face_detected = data.get(
+        "face_detected",
+        False,
+    )
+
+    eyes_closed = data.get(
+        "eyes_closed",
+        False,
+    )
 
     if type(available) is not bool:
-        raise ValueError("Invalid drowsiness availability.")
+        raise ValueError(
+            "Invalid drowsiness availability."
+        )
 
     if type(face_detected) is not bool:
-        raise ValueError("Invalid face detection measurement.")
+        raise ValueError(
+            "Invalid face detection measurement."
+        )
 
     if type(eyes_closed) is not bool:
-        raise ValueError("Invalid eye-closure measurement.")
+        raise ValueError(
+            "Invalid eye-closure measurement."
+        )
 
     if face_detected and not available:
         raise ValueError(
-            "A face cannot be detected when drowsiness detection is unavailable."
+            "A face cannot be detected when drowsiness "
+            "detection is unavailable."
         )
 
     # ---------------------------------------------------------
@@ -204,18 +296,23 @@ def prediction_from_payload(data, threshold=None):
     right_ear = _optional_ratio(data, "right_ear")
     perclos = _optional_ratio(data, "perclos")
 
-    closed_duration = data.get("closed_duration", 0.0)
+    closed_duration = data.get(
+        "closed_duration",
+        0.0,
+    )
 
     if (
         not _valid_number(closed_duration)
         or not 0 <= closed_duration <= 600
     ):
-        raise ValueError("Invalid eye-closure duration.")
+        raise ValueError(
+            "Invalid eye-closure duration."
+        )
 
     closed_duration = float(closed_duration)
 
     # ---------------------------------------------------------
-    # Alert validation
+    # Drowsiness alert validation
     # ---------------------------------------------------------
 
     alert_level = data.get(
@@ -223,30 +320,40 @@ def prediction_from_payload(data, threshold=None):
         "UNKNOWN",
     )
 
-    if not isinstance(alert_level, str) or alert_level not in ALERT_LEVELS:
-        raise ValueError("Invalid drowsiness alert level.")
+    if (
+        not isinstance(alert_level, str)
+        or alert_level not in ALERT_LEVELS
+    ):
+        raise ValueError(
+            "Invalid drowsiness alert level."
+        )
 
     # ---------------------------------------------------------
     # Normalize missing or unavailable facial measurements
     # ---------------------------------------------------------
 
     if not available:
+
         if eyes_closed:
             raise ValueError(
-                "Eye closure cannot be true when drowsiness is unavailable."
+                "Eye closure cannot be true when drowsiness "
+                "is unavailable."
             )
 
         face_detected = False
         alert_level = "UNKNOWN"
+
         ear = None
         left_ear = None
         right_ear = None
         perclos = None
+
         closed_duration = 0.0
 
     elif not face_detected:
+
         # The detector is running, but no face is visible.
-        # This must not be interpreted as normal alertness.
+        # Missing face data must not be interpreted as alertness.
 
         if eyes_closed:
             raise ValueError(
@@ -254,18 +361,25 @@ def prediction_from_payload(data, threshold=None):
             )
 
         alert_level = "UNKNOWN"
+
         ear = None
         left_ear = None
         right_ear = None
+
         closed_duration = 0.0
 
     # ---------------------------------------------------------
-    # Store drowsiness measurements
+    # Store independent drowsiness measurements
     # ---------------------------------------------------------
 
     readings.drowsiness_available = available
     readings.face_detected = face_detected
-    readings.eyes_closed = eyes_closed if face_detected else False
+
+    readings.eyes_closed = (
+        eyes_closed
+        if face_detected
+        else False
+    )
 
     readings.drowsiness_alert_level = alert_level
 

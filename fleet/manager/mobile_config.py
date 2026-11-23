@@ -18,10 +18,10 @@ MOBILE_JS = MOBILE_ROOT / "js"
 
 MODELS_DIR = PROJECT_ROOT / "models"
 
-# Driver behaviour classification model.
+# Driver behaviour classification model (9 classes).
 MOBILE_MODEL = (
     MODELS_DIR
-    / "driver_mobilenetv3_small.onnx"
+    / "driver_behavior_mobilenetv3.onnx"
 )
 
 # Face landmark model used for drowsiness detection.
@@ -65,6 +65,7 @@ def validate_mobile_config():
     }
 
     for name, value in positive_limits.items():
+
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise TypeError(
                 f"{name} must be a number."

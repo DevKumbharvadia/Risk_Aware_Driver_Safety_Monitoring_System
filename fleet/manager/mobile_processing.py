@@ -12,18 +12,28 @@ from ..mobile.phone_speed import PhoneSpeed
 # ---------------------------------------------------------------------
 
 BEHAVIOR_LABELS = {
+    # New 9-class model
+    "safe_driving": "SAFE DRIVING",
+
+    "texting_right": "TEXTING RIGHT",
+    "talking_phone_right": "TALKING ON PHONE (RIGHT)",
+
+    "texting_left": "TEXTING LEFT",
+    "talking_phone_left": "TALKING ON PHONE (LEFT)",
+
+    "operating_radio": "OPERATING RADIO",
+    "drinking": "DRINKING",
+    "reaching_behind": "REACHING BEHIND",
+    "talking_to_passenger": "TALKING TO PASSENGER",
+
+    # Backward compatibility with previous classifiers
     "texting_phone": "PHONE USE",
     "texting": "PHONE USE",
 
     "talking_phone": "PHONE USE",
     "talking_on_phone": "PHONE USE",
 
-    "drinking": "DRINKING",
-    "reaching_behind": "REACHING BEHIND",
-
     "turning": "TURNING",
-
-    "safe_driving": "SAFE DRIVING",
     "safe": "SAFE DRIVING",
 
     "other_activities": "OTHER ACTIVITIES",
@@ -33,18 +43,28 @@ BEHAVIOR_LABELS = {
 
 
 CLASSIFIER_NAMES = {
+    # New 9-class model
+    "safe_driving": "Safe driving",
+
+    "texting_right": "Texting right",
+    "talking_phone_right": "Talking on phone right",
+
+    "texting_left": "Texting left",
+    "talking_phone_left": "Talking on phone left",
+
+    "operating_radio": "Operating radio",
+    "drinking": "Drinking",
+    "reaching_behind": "Reaching behind",
+    "talking_to_passenger": "Talking to passenger",
+
+    # Backward compatibility with previous classifiers
     "texting_phone": "Texting on phone",
     "texting": "Texting",
 
     "talking_phone": "Talking on phone",
     "talking_on_phone": "Talking on phone",
 
-    "drinking": "Drinking",
-    "reaching_behind": "Reaching behind",
-
     "turning": "Turning",
-
-    "safe_driving": "Safe driving",
     "safe": "Safe driving",
 
     "other_activities": "Other activities",
@@ -69,6 +89,7 @@ def behavior_label(
     if behavior in BEHAVIOR_LABELS:
         return BEHAVIOR_LABELS[behavior]
 
+    # Preserve the existing phone-detection fallback.
     if handset_visible is True:
         return "PHONE USE"
 

@@ -18,6 +18,13 @@ from .mobile_config import (
 )
 
 
+# New model endpoint.
+MODEL_ENDPOINT = f"/models/{MOBILE_MODEL.name}"
+
+# Backward compatibility for older mobile JavaScript.
+LEGACY_MODEL_ENDPOINT = "/models/driver_mobilenetv3_small.onnx"
+
+
 class MobileHandler(PhoneHandler):
     """Serve mobile assets and handle authenticated phone requests."""
 
@@ -190,7 +197,10 @@ class MobileHandler(PhoneHandler):
         # Browser ONNX model
         # -------------------------------------------------------------
 
-        if path == "/models/driver_mobilenetv3_small.onnx":
+        if path in (
+            MODEL_ENDPOINT,
+            LEGACY_MODEL_ENDPOINT,
+        ):
 
             try:
                 if not MOBILE_MODEL.is_file():

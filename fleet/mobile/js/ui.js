@@ -1,30 +1,100 @@
 
 "use strict";
 
-/* Status and connection */
+/* =========================================================
+   DRIVER BEHAVIOUR LABELS
+========================================================= */
+
+const BEHAVIOUR_DISPLAY_NAMES = {
+    safe_driving: "Safe Driving",
+    texting_right: "Texting Right",
+    talking_phone_right: "Talking on Phone (Right)",
+    texting_left: "Texting Left",
+    talking_phone_left: "Talking on Phone (Left)",
+    operating_radio: "Operating Radio",
+    drinking: "Drinking",
+    reaching_behind: "Reaching Behind",
+    talking_to_passenger: "Talking to Passenger"
+};
+
+
+/* =========================================================
+   STATUS AND CONNECTION
+========================================================= */
 
 function status(message) {
-    $("status").textContent = message;
+
+    const element = $("status");
+
+    if (element) {
+        element.textContent = message;
+    }
 }
 
 function connection(message) {
-    $("connection").textContent = message;
+
+    const element = $("connection");
+
+    if (element) {
+        element.textContent = message;
+    }
 }
 
-/* Risk indicator */
+
+/* =========================================================
+   BEHAVIOUR LABEL FORMATTING
+========================================================= */
+
+function formatBehaviourLabel(label) {
+
+    if (typeof label !== "string" || !label.trim()) {
+        return "Unknown Behaviour";
+    }
+
+    const normalized = label
+        .trim()
+        .toLowerCase();
+
+    if (BEHAVIOUR_DISPLAY_NAMES[normalized]) {
+        return BEHAVIOUR_DISPLAY_NAMES[normalized];
+    }
+
+    return normalized
+        .split("_")
+        .map(
+            word =>
+                word.charAt(0).toUpperCase() +
+                word.slice(1)
+        )
+        .join(" ");
+}
+
+
+/* =========================================================
+   RISK INDICATOR
+========================================================= */
 
 function setRisk(level) {
+
     const element = $("risk");
+
+    if (!element) {
+        return;
+    }
 
     const value = String(
         level || "UNKNOWN"
     ).toUpperCase();
 
     element.textContent = value;
+
     element.dataset.level = value;
 }
 
-/* Drowsiness indicator */
+
+/* =========================================================
+   DROWSINESS INDICATOR
+========================================================= */
 
 function updateDrowsinessDisplay(data) {
 
@@ -86,22 +156,61 @@ function updateDrowsinessDisplay(data) {
     }
 }
 
-/* Client-side behaviour prediction */
+
+/* =========================================================
+   CLIENT-SIDE BEHAVIOUR PREDICTION
+========================================================= */
 
 function showClientPrediction(prediction) {
 
+    if (
+        !prediction ||
+        typeof prediction.label !== "string"
+    ) {
+        return;
+    }
+
     lastClientPrediction = prediction;
 
-    $("modelPrediction").hidden = false;
+    const element = $("modelPrediction");
 
-    $("modelPrediction").textContent =
-        prediction.label + " · " +
-        (prediction.confidence * 100).toFixed(1) + "%";
+    if (!element) {
+        return;
+    }
+
+    element.hidden = false;
+
+    const label = formatBehaviourLabel(
+        prediction.label
+    );
+
+    const confidence = Number(
+        prediction.confidence
+    );
+
+    element.textContent =
+        Number.isFinite(confidence) &&
+        confidence >= 0 &&
+        confidence <= 1
+            ? `${label} · ${(confidence * 100).toFixed(1)}%`
+            : label;
+
+    element.dataset.behaviour =
+        prediction.label;
 }
 
-/* Sensor display */
+
+/* =========================================================
+   SENSOR DISPLAY
+========================================================= */
 
 function updateSensors() {
+
+    const element = $("sensorDetails");
+
+    if (!element) {
+        return;
+    }
 
     const gps = manualSpeedEnabled
         ? `manual test speed ${manualSpeedKmh} km/h`
@@ -119,17 +228,28 @@ function updateSensors() {
         .map(v => v.toFixed(2))
         .join(", ");
 
-    $("sensorDetails").textContent =
+    element.textContent =
         `GPS: ${gps} | Accelerometer: [${a}] | Gyroscope: [${g}]`;
 }
 
-/* Speed simulator */
+
+/* =========================================================
+   SPEED SIMULATOR
+========================================================= */
 
 function updateSpeedUI() {
 
     const panel = $("speedTest");
     const badge = $("speedModeBadge");
     const button = $("speedModeButton");
+
+    if (
+        !panel ||
+        !badge ||
+        !button
+    ) {
+        return;
+    }
 
     panel.dataset.active =
         String(manualSpeedEnabled);
@@ -146,26 +266,51 @@ function updateSpeedUI() {
         ? "Disable Manual Speed"
         : "Enable Manual Speed";
 
-    $("speedDisplay").textContent =
-        `${manualSpeedKmh} km/h`;
+    const display = $("speedDisplay");
 
-    $("speedInput").value = manualSpeedKmh;
-    $("speedSlider").value = manualSpeedKmh;
+    if (display) {
+        display.textContent =
+            `${manualSpeedKmh} km/h`;
+    }
 
-    $("speedTestNote").textContent =
-        manualSpeedEnabled
-            ? "TEST MODE active: this simulated value is uploaded as telemetry."
-            : "Live GPS is used for telemetry. Manual speed is test-only.";
+    const input = $("speedInput");
+    const slider = $("speedSlider");
+
+    if (input) {
+        input.value = manualSpeedKmh;
+    }
+
+    if (slider) {
+        slider.value = manualSpeedKmh;
+    }
+
+    const note = $("speedTestNote");
+
+    if (note) {
+
+        note.textContent =
+            manualSpeedEnabled
+                ? "TEST MODE active: this simulated value is uploaded as telemetry."
+                : "Live GPS is used for telemetry. Manual speed is test-only.";
+    }
 
     updateSensors();
 }
 
-/* Apply manual speed */
+
+/* =========================================================
+   APPLY MANUAL SPEED
+========================================================= */
 
 function applyManualSpeed() {
 
-    const value =
-        Number($("speedInput").value);
+    const input = $("speedInput");
+
+    if (!input) {
+        return;
+    }
+
+    const value = Number(input.value);
 
     if (
         !Number.isFinite(value) ||
@@ -186,8 +331,12 @@ function applyManualSpeed() {
 
     if (manualSpeedEnabled) {
 
-        $("speed").textContent =
-            manualSpeedKmh.toFixed(1);
+        const speed = $("speed");
+
+        if (speed) {
+            speed.textContent =
+                manualSpeedKmh.toFixed(1);
+        }
     }
 
     status(
@@ -197,7 +346,10 @@ function applyManualSpeed() {
     );
 }
 
-/* Toggle manual speed */
+
+/* =========================================================
+   TOGGLE MANUAL SPEED
+========================================================= */
 
 function toggleManualSpeed() {
 
@@ -205,10 +357,14 @@ function toggleManualSpeed() {
 
     updateSpeedUI();
 
+    const speed = $("speed");
+
     if (manualSpeedEnabled) {
 
-        $("speed").textContent =
-            manualSpeedKmh.toFixed(1);
+        if (speed) {
+            speed.textContent =
+                manualSpeedKmh.toFixed(1);
+        }
 
         status(
             `Manual speed testing enabled: ${manualSpeedKmh} km/h`
@@ -216,93 +372,157 @@ function toggleManualSpeed() {
 
     } else {
 
-        $("speed").textContent =
-            gpsPosition &&
-            Number.isFinite(gpsPosition.coords.speed)
-                ? (
-                    gpsPosition.coords.speed * 3.6
-                ).toFixed(1)
-                : "—";
+        if (speed) {
+
+            speed.textContent =
+                gpsPosition &&
+                Number.isFinite(gpsPosition.coords.speed)
+                    ? (
+                        gpsPosition.coords.speed * 3.6
+                    ).toFixed(1)
+                    : "—";
+        }
 
         status("Live GPS speed restored.");
     }
 }
 
-/* Speed controls */
 
-$("speedInput").addEventListener(
-    "input",
-    () => {
+/* =========================================================
+   SPEED CONTROLS
+========================================================= */
 
-        const value =
-            Number($("speedInput").value);
+const speedInputElement = $("speedInput");
 
-        if (
-            Number.isFinite(value) &&
-            value >= 0 &&
-            value <= 160
-        ) {
+if (speedInputElement) {
 
-            $("speedSlider").value = value;
+    speedInputElement.addEventListener(
+        "input",
+        () => {
 
-            $("speedDisplay").textContent =
-                `${value} km/h`;
+            const value =
+                Number(speedInputElement.value);
+
+            if (
+                Number.isFinite(value) &&
+                value >= 0 &&
+                value <= 160
+            ) {
+
+                const slider = $("speedSlider");
+                const display = $("speedDisplay");
+
+                if (slider) {
+                    slider.value = value;
+                }
+
+                if (display) {
+                    display.textContent =
+                        `${value} km/h`;
+                }
+            }
         }
-    }
-);
+    );
+}
 
-$("speedSlider").addEventListener(
-    "input",
-    () => {
 
-        $("speedInput").value =
-            $("speedSlider").value;
+const speedSliderElement = $("speedSlider");
 
-        $("speedDisplay").textContent =
-            `${$("speedSlider").value} km/h`;
-    }
-);
+if (speedSliderElement) {
 
-$("applySpeed").addEventListener(
-    "click",
-    applyManualSpeed
-);
+    speedSliderElement.addEventListener(
+        "input",
+        () => {
 
-$("speedModeButton").addEventListener(
-    "click",
-    toggleManualSpeed
-);
+            const input = $("speedInput");
+            const display = $("speedDisplay");
 
-/* Dashboard updates */
+            if (input) {
+                input.value = speedSliderElement.value;
+            }
+
+            if (display) {
+                display.textContent =
+                    `${speedSliderElement.value} km/h`;
+            }
+        }
+    );
+}
+
+
+const applySpeedButton = $("applySpeed");
+
+if (applySpeedButton) {
+
+    applySpeedButton.addEventListener(
+        "click",
+        applyManualSpeed
+    );
+}
+
+
+const speedModeButton = $("speedModeButton");
+
+if (speedModeButton) {
+
+    speedModeButton.addEventListener(
+        "click",
+        toggleManualSpeed
+    );
+}
+
+
+/* =========================================================
+   DASHBOARD UPDATES
+========================================================= */
 
 function updateDashboard(data) {
 
+    if (!data || typeof data !== "object") {
+        return;
+    }
+
+    /* Risk indicator */
+
     setRisk(data.risk || "UNKNOWN");
+
 
     /* Speed */
 
-    if (manualSpeedEnabled) {
+    const speedElement = $("speed");
 
-        $("speed").textContent =
-            manualSpeedKmh.toFixed(1);
+    if (speedElement) {
 
-    } else {
+        if (manualSpeedEnabled) {
 
-        $("speed").textContent =
-            Number.isFinite(data.speed)
-                ? data.speed.toFixed(1)
-                : "—";
+            speedElement.textContent =
+                manualSpeedKmh.toFixed(1);
+
+        } else {
+
+            speedElement.textContent =
+                Number.isFinite(data.speed)
+                    ? data.speed.toFixed(1)
+                    : "—";
+        }
     }
+
 
     /* Trip information */
 
     if (data.driver || data.route) {
 
-        $("trip").textContent = [
-            data.driver,
-            data.route
-        ].filter(Boolean).join(" · ");
+        const tripElement = $("trip");
+
+        if (tripElement) {
+
+            tripElement.textContent = [
+                data.driver,
+                data.route
+            ].filter(Boolean).join(" · ");
+        }
     }
+
 
     /* Behaviour prediction */
 
@@ -312,12 +532,23 @@ function updateDashboard(data) {
         data.prediction ||
         data.label;
 
+    const confidence =
+        Number.isFinite(data.classifier_score)
+            ? data.classifier_score
+            : (
+                Number.isFinite(data.confidence)
+                    ? data.confidence
+                    : null
+            );
+
     if (label) {
 
-        $("modelPrediction").hidden = false;
+        showClientPrediction({
 
-        $("modelPrediction").textContent =
-            label;
+            label,
+
+            confidence
+        });
 
     } else if (lastClientPrediction) {
 
@@ -325,6 +556,7 @@ function updateDashboard(data) {
             lastClientPrediction
         );
     }
+
 
     /* Drowsiness measurements from server */
 
@@ -354,6 +586,7 @@ function updateDashboard(data) {
         });
     }
 
+
     /* Status */
 
     status(
@@ -363,11 +596,16 @@ function updateDashboard(data) {
     );
 }
 
-/* Initial UI */
+
+/* =========================================================
+   INITIAL UI
+========================================================= */
 
 updateSpeedUI();
 
 updateDrowsinessDisplay({
+
     available: false,
+
     alert_level: "UNKNOWN"
 });

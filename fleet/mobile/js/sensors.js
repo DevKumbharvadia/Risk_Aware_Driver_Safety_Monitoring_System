@@ -1,20 +1,29 @@
 
 "use strict";
 
-/* Sensor state */
+/* =========================================================
+   SENSOR STATE
+========================================================= */
 
 let sensorsStarted = false;
 
-/* Safe numeric conversion */
+
+/* =========================================================
+   SAFE NUMERIC CONVERSION
+========================================================= */
 
 function numberOrZero(value) {
+
     return (
         typeof value === "number" &&
         Number.isFinite(value)
     ) ? value : 0;
 }
 
-/* Start GPS and motion sensors */
+
+/* =========================================================
+   START GPS AND MOTION SENSORS
+========================================================= */
 
 function startSensors() {
 
@@ -37,6 +46,7 @@ function startSensors() {
                 }
 
                 gpsPosition = position;
+
                 gpsStatus = "available";
 
                 updateSensors();
@@ -77,7 +87,10 @@ function startSensors() {
     updateSensors();
 }
 
-/* Stop GPS and motion sensors */
+
+/* =========================================================
+   STOP GPS AND MOTION SENSORS
+========================================================= */
 
 function stopSensors() {
 
@@ -87,6 +100,7 @@ function stopSensors() {
         gpsWatchId !== null &&
         navigator.geolocation
     ) {
+
         navigator.geolocation.clearWatch(
             gpsWatchId
         );
@@ -95,9 +109,11 @@ function stopSensors() {
     gpsWatchId = null;
 
     gpsPosition = null;
+
     gpsStatus = "estimating";
 
     acceleration = [0, 0, 0];
+
     gyroscope = [0, 0, 0];
 
     window.removeEventListener(
@@ -108,7 +124,10 @@ function stopSensors() {
     updateSensors();
 }
 
-/* Read motion sensor */
+
+/* =========================================================
+   READ MOTION SENSOR
+========================================================= */
 
 function onMotion(event) {
 
@@ -125,25 +144,36 @@ function onMotion(event) {
     if (a) {
 
         acceleration = [
+
             numberOrZero(a.x),
+
             numberOrZero(a.y),
+
             numberOrZero(a.z)
+
         ];
     }
 
     if (r) {
 
         gyroscope = [
+
             numberOrZero(r.alpha),
+
             numberOrZero(r.beta),
+
             numberOrZero(r.gamma)
+
         ];
     }
 
     updateSensors();
 }
 
-/* Request motion permission */
+
+/* =========================================================
+   REQUEST MOTION PERMISSION
+========================================================= */
 
 async function requestMotionPermission() {
 
@@ -158,6 +188,7 @@ async function requestMotionPermission() {
                 await DeviceMotionEvent.requestPermission();
 
             if (result !== "granted") {
+
                 console.warn(
                     "Motion permission denied."
                 );
@@ -179,15 +210,19 @@ async function requestMotionPermission() {
     return true;
 }
 
-/* GPS telemetry */
+
+/* =========================================================
+   GPS TELEMETRY
+========================================================= */
 
 function gpsPayload() {
 
-    /* Manual speed */
+    /* Manual speed simulation */
 
     if (manualSpeedEnabled) {
 
         return {
+
             timestamp: Date.now() / 1000,
 
             speed_mps:

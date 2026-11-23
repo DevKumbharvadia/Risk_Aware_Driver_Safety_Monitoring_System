@@ -7,6 +7,7 @@ from io import BytesIO
 import hmac
 import json
 import logging
+import math
 import re
 import sqlite3
 import threading
@@ -21,6 +22,21 @@ def _reject_json_constant(value):
     """Reject non-standard JSON values such as NaN and Infinity."""
 
     raise ValueError(f"Invalid JSON numeric value: {value}")
+
+
+def _validate_json_value(value):
+    """Reject non-finite numbers before sending JSON responses."""
+
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("Response contains an invalid numeric value.")
+
+    if isinstance(value, dict):
+        for item in value.values():
+            _validate_json_value(item)
+
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _validate_json_value(item)
 
 
 class FleetServer(ThreadingHTTPServer):
@@ -191,10 +207,13 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             if content_type == "application/json":
+                _validate_json_value(data)
+
                 body = json.dumps(
                     data,
                     allow_nan=False,
                 ).encode("utf-8")
+
             else:
                 if not isinstance(data, bytes):
                     raise TypeError(

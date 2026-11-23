@@ -1,9 +1,12 @@
 
 "use strict";
 
-/* Authentication headers */
+/* =========================================================
+   AUTHENTICATION HEADERS
+========================================================= */
 
 function authHeaders(json = true) {
+
     const headers = {};
 
     if (json) {
@@ -17,14 +20,20 @@ function authHeaders(json = true) {
     return headers;
 }
 
-/* Check server compatibility */
+
+/* =========================================================
+   CHECK SERVER COMPATIBILITY
+========================================================= */
 
 async function checkServer() {
+
     status("Checking server connection...");
 
     const response = await fetch(
         "/version",
-        { cache: "no-store" }
+        {
+            cache: "no-store"
+        }
     );
 
     if (!response.ok) {
@@ -34,31 +43,45 @@ async function checkServer() {
     const data = await response.json();
 
     if (data.mobile !== 7) {
+
         throw Error(
             "Mobile/server version mismatch. Refresh the vehicle link."
         );
     }
 }
 
-/* Synchronize clocks */
+
+/* =========================================================
+   SYNCHRONIZE CLOCKS
+========================================================= */
 
 async function syncClock() {
+
     const before = performance.now();
 
     const response = await fetch(
         "/clock",
-        { cache: "no-store" }
+        {
+            cache: "no-store"
+        }
     );
 
     if (!response.ok) {
-        throw Error("Could not synchronize server clock.");
+
+        throw Error(
+            "Could not synchronize server clock."
+        );
     }
 
     const data = await response.json();
+
     const after = performance.now();
 
     if (!Number.isFinite(data.monotonic)) {
-        throw Error("Invalid server clock response.");
+
+        throw Error(
+            "Invalid server clock response."
+        );
     }
 
     clockOffset =
@@ -68,7 +91,9 @@ async function syncClock() {
     lastClockSync = performance.now();
 }
 
+
 async function ensureClock() {
+
     if (
         !lastClockSync ||
         performance.now() - lastClockSync > CLOCK_INTERVAL
@@ -77,47 +102,148 @@ async function ensureClock() {
     }
 }
 
+
 function captureTime() {
+
     return performance.now() / 1000 + clockOffset;
 }
 
-/* Update drowsiness indicator */
+
+/* =========================================================
+   UPDATE DROWSINESS INDICATOR
+========================================================= */
 
 function updateDrowsinessDisplay(data) {
+
     const element = $("drowsiness");
 
-    if (!element) return;
+    if (!element) {
+        return;
+    }
 
-    const level = data?.alert_level || "UNKNOWN";
+    const level = String(
+        data?.alert_level || "UNKNOWN"
+    ).toUpperCase();
 
     const labels = {
+
         NORMAL: "Normal",
+
         WARNING: "Warning",
+
         CRITICAL: "Drowsy",
+
         UNKNOWN: "Unavailable"
     };
 
     element.dataset.level = level;
+
     element.textContent =
         labels[level] || "Unavailable";
 }
 
-/* Validate MediaPipe detector */
+
+/* =========================================================
+   VALIDATE NEW DRIVER MODEL
+========================================================= */
+
+function validateDriverModel() {
+
+    if (!session) {
+
+        throw Error(
+            "Driver behaviour ONNX model is not loaded."
+        );
+    }
+
+    if (
+        typeof CLASS_NAMES === "undefined" ||
+        CLASS_NAMES.length !== 9
+    ) {
+
+        throw Error(
+            "Driver model must have exactly nine configured classes."
+        );
+    }
+
+    if (
+        typeof SIZE === "undefined" ||
+        SIZE !== 256
+    ) {
+
+        throw Error(
+            "Driver model input size must be 256x256."
+        );
+    }
+
+    const expectedClasses = [
+
+        "safe_driving",
+
+        "texting_right",
+
+        "talking_phone_right",
+
+        "texting_left",
+
+        "talking_phone_left",
+
+        "operating_radio",
+
+        "drinking",
+
+        "reaching_behind",
+
+        "talking_to_passenger"
+    ];
+
+    for (
+        let i = 0;
+        i < expectedClasses.length;
+        i++
+    ) {
+
+        if (CLASS_NAMES[i] !== expectedClasses[i]) {
+
+            throw Error(
+                `Driver model class mismatch at index ${i}. Expected ${expectedClasses[i]}, received ${CLASS_NAMES[i]}.`
+            );
+        }
+    }
+
+    console.info(
+        "Driver behaviour model configuration verified.",
+        {
+            model: MODEL_URL,
+            inputSize: SIZE,
+            classes: CLASS_NAMES
+        }
+    );
+}
+
+
+/* =========================================================
+   INITIALIZE DROWSINESS DETECTOR
+========================================================= */
 
 async function initializeDrowsinessDetector() {
 
     if (!window.drowsinessDetector) {
+
         throw Error(
             "Drowsiness detector script did not load. Check drowsiness.js."
         );
     }
 
-    status("Loading drowsiness detection model...");
+    status(
+        "Loading drowsiness detection model..."
+    );
 
     const initialized =
         await window.drowsinessDetector.initialize();
 
     if (initialized !== true) {
+
         throw Error(
             "MediaPipe drowsiness detector could not initialize."
         );
@@ -130,11 +256,15 @@ async function initializeDrowsinessDetector() {
     );
 }
 
-/* Verify that the detector can process camera frames */
+
+/* =========================================================
+   VERIFY DROWSINESS DETECTOR
+========================================================= */
 
 function verifyDrowsinessDetector() {
 
     if (!window.drowsinessDetector) {
+
         throw Error(
             "Drowsiness detector is unavailable."
         );
@@ -143,7 +273,11 @@ function verifyDrowsinessDetector() {
     const result =
         window.drowsinessDetector.detect(video);
 
-    if (!result || result.available !== true) {
+    if (
+        !result ||
+        result.available !== true
+    ) {
+
         throw Error(
             "Drowsiness detector cannot process camera frames."
         );
@@ -161,7 +295,10 @@ function verifyDrowsinessDetector() {
     return result;
 }
 
-/* Start camera monitoring */
+
+/* =========================================================
+   START CAMERA MONITORING
+========================================================= */
 
 async function startMonitoring() {
 
@@ -170,6 +307,7 @@ async function startMonitoring() {
     }
 
     if (!token) {
+
         connection("Error");
 
         status(
@@ -180,6 +318,7 @@ async function startMonitoring() {
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
+
         connection("Error");
 
         status(
@@ -191,7 +330,13 @@ async function startMonitoring() {
 
     starting = true;
 
-    $("start").disabled = true;
+    const startButton = $("start");
+
+    const stopButton = $("stop");
+
+    if (startButton) {
+        startButton.disabled = true;
+    }
 
     const attempt = ++startAttempt;
 
@@ -224,6 +369,10 @@ async function startMonitoring() {
 
         if (attempt !== startAttempt) return;
 
+        /* Verify the new nine-class model */
+
+        validateDriverModel();
+
         /* Initialize MediaPipe */
 
         await initializeDrowsinessDetector();
@@ -238,17 +387,28 @@ async function startMonitoring() {
 
         /* Request camera */
 
-        status("Requesting camera permission...");
+        status(
+            "Requesting camera permission..."
+        );
 
-        stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
+        stream =
+            await navigator.mediaDevices.getUserMedia({
 
-            video: {
-                facingMode: "user",
-                width: { ideal: 640 },
-                height: { ideal: 480 }
-            }
-        });
+                audio: false,
+
+                video: {
+
+                    facingMode: "user",
+
+                    width: {
+                        ideal: 640
+                    },
+
+                    height: {
+                        ideal: 480
+                    }
+                }
+            });
 
         if (attempt !== startAttempt) {
 
@@ -275,21 +435,33 @@ async function startMonitoring() {
             !video.videoWidth ||
             !video.videoHeight
         ) {
+
             await new Promise((resolve, reject) => {
 
-                const timeout = setTimeout(() => {
-                    reject(
-                        Error("Camera did not produce video frames.")
-                    );
-                }, 5000);
+                const timeout = setTimeout(
+                    () => {
+
+                        reject(
+                            Error(
+                                "Camera did not produce video frames."
+                            )
+                        );
+
+                    },
+                    5000
+                );
 
                 video.addEventListener(
                     "loadeddata",
                     () => {
+
                         clearTimeout(timeout);
+
                         resolve();
                     },
-                    { once: true }
+                    {
+                        once: true
+                    }
                 );
             });
         }
@@ -300,6 +472,7 @@ async function startMonitoring() {
             !video.videoWidth ||
             !video.videoHeight
         ) {
+
             throw Error(
                 "Camera produced no usable video frames."
             );
@@ -309,7 +482,7 @@ async function startMonitoring() {
 
         window.drowsinessDetector.reset();
 
-        /* Verify MediaPipe against the live camera */
+        /* Verify MediaPipe against live camera */
 
         const drowsinessTest =
             verifyDrowsinessDetector();
@@ -324,6 +497,7 @@ async function startMonitoring() {
         startSensors();
 
         running = true;
+
         starting = false;
 
         connection("Monitoring");
@@ -335,13 +509,23 @@ async function startMonitoring() {
         setRisk("UNKNOWN");
 
         updateDrowsinessDisplay({
+
             alert_level: "UNKNOWN"
         });
 
-        $("cameraState").textContent = "Private";
+        const cameraState = $("cameraState");
 
-        $("stop").disabled = false;
-        $("start").disabled = true;
+        if (cameraState) {
+            cameraState.textContent = "Private";
+        }
+
+        if (stopButton) {
+            stopButton.disabled = false;
+        }
+
+        if (startButton) {
+            startButton.disabled = true;
+        }
 
         /* Start preview and inference */
 
@@ -361,16 +545,21 @@ async function startMonitoring() {
         connection("Error");
 
         status(
-            error.message || "Unable to start monitoring."
+            error.message ||
+            "Unable to start monitoring."
         );
     }
 }
 
-/* Stop and release resources */
+
+/* =========================================================
+   STOP AND RELEASE RESOURCES
+========================================================= */
 
 function cleanup() {
 
     running = false;
+
     starting = false;
 
     startAttempt++;
@@ -378,9 +567,11 @@ function cleanup() {
     /* Stop scheduled loops */
 
     clearTimeout(inferenceTimer);
+
     clearTimeout(previewTimer);
 
     inferenceTimer = null;
+
     previewTimer = null;
 
     /* Stop preview */
@@ -394,6 +585,7 @@ function cleanup() {
     /* Reset drowsiness history */
 
     if (window.drowsinessDetector) {
+
         window.drowsinessDetector.reset();
     }
 
@@ -408,23 +600,42 @@ function cleanup() {
         stream = null;
     }
 
-    video.srcObject = null;
+    if (video) {
+        video.srcObject = null;
+    }
 
     /* Reset UI */
 
-    $("cameraState").textContent = "Off";
+    const cameraState = $("cameraState");
 
-    $("stop").disabled = true;
-    $("start").disabled = false;
+    if (cameraState) {
+        cameraState.textContent = "Off";
+    }
+
+    const stopButton = $("stop");
+
+    const startButton = $("start");
+
+    if (stopButton) {
+        stopButton.disabled = true;
+    }
+
+    if (startButton) {
+        startButton.disabled = false;
+    }
 
     inferenceBusy = false;
 
     updateDrowsinessDisplay({
+
         alert_level: "UNKNOWN"
     });
 }
 
-/* User stop action */
+
+/* =========================================================
+   USER STOP ACTION
+========================================================= */
 
 function stopMonitoring() {
 
@@ -432,30 +643,51 @@ function stopMonitoring() {
 
     connection("Stopped");
 
-    status("Monitoring stopped");
+    status(
+        "Monitoring stopped"
+    );
 }
 
-/* Event listeners */
 
-$("start").addEventListener(
-    "click",
-    startMonitoring
-);
+/* =========================================================
+   EVENT LISTENERS
+========================================================= */
 
-$("stop").addEventListener(
-    "click",
-    stopMonitoring
-);
+const startButtonElement = $("start");
+
+if (startButtonElement) {
+
+    startButtonElement.addEventListener(
+        "click",
+        startMonitoring
+    );
+}
+
+
+const stopButtonElement = $("stop");
+
+if (stopButtonElement) {
+
+    stopButtonElement.addEventListener(
+        "click",
+        stopMonitoring
+    );
+}
+
 
 window.addEventListener(
     "beforeunload",
     cleanup
 );
 
-/* Initial UI */
+
+/* =========================================================
+   INITIAL UI
+========================================================= */
 
 updateSensors();
 
 updateDrowsinessDisplay({
+
     alert_level: "UNKNOWN"
 });

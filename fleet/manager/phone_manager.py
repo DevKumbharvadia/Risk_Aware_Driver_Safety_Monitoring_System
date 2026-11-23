@@ -243,7 +243,7 @@ def run_manager(args, config):
             return result
 
         # ---------------------------------------------------------
-        # Start server threads
+        # Server threads
         # ---------------------------------------------------------
 
         mobile_thread = threading.Thread(
@@ -258,25 +258,10 @@ def run_manager(args, config):
             daemon=False,
         )
 
-        mobile_thread.start()
+        mobile_started = False
+        fleet_started = False
 
-        try:
-            fleet_thread.start()
-
-        except Exception:
-
-            mobile_server.stopping.set()
-            mobile_server.shutdown()
-
-            mobile_thread.join(timeout=5)
-
-            raise
-
-        # ---------------------------------------------------------
-        # Initialize owner dashboard
-        # ---------------------------------------------------------
-
-        root = tk.Tk()
+        root = None
 
         shutdown_lock = threading.Lock()
         shutdown_started = False
@@ -311,33 +296,36 @@ def run_manager(args, config):
                     "Could not clear camera preview selection."
                 )
 
-            # Stop HTTP servers.
-            try:
-                mobile_server.shutdown()
+            # Stop only servers whose threads were started.
+            if mobile_started:
+                try:
+                    mobile_server.shutdown()
 
-            except Exception:
-                logging.exception(
-                    "Mobile server shutdown failed."
-                )
+                except Exception:
+                    logging.exception(
+                        "Mobile server shutdown failed."
+                    )
 
-            try:
-                fleet.shutdown()
+            if fleet_started:
+                try:
+                    fleet.shutdown()
 
-            except Exception:
-                logging.exception(
-                    "Fleet server shutdown failed."
-                )
+                except Exception:
+                    logging.exception(
+                        "Fleet server shutdown failed."
+                    )
 
             # Wait for worker threads to finish.
             current_thread = threading.current_thread()
 
-            for thread in (
-                mobile_thread,
-                fleet_thread,
+            for thread, started in (
+                (mobile_thread, mobile_started),
+                (fleet_thread, fleet_started),
             ):
 
                 if (
-                    thread.is_alive()
+                    started
+                    and thread.is_alive()
                     and thread is not current_thread
                 ):
 
@@ -349,10 +337,10 @@ def run_manager(args, config):
                             thread.name,
                         )
 
-            # Destroy the Tkinter window.
+            # Destroy the Tkinter window if it was created.
             try:
 
-                if root.winfo_exists():
+                if root is not None and root.winfo_exists():
                     root.destroy()
 
             except tk.TclError:
@@ -363,10 +351,18 @@ def run_manager(args, config):
             )
 
         # ---------------------------------------------------------
-        # Register dashboard
+        # Start services and initialize dashboard
         # ---------------------------------------------------------
 
         try:
+            mobile_thread.start()
+            mobile_started = True
+
+            fleet_thread.start()
+            fleet_started = True
+
+            # Initialize owner dashboard.
+            root = tk.Tk()
 
             OwnerApp(
                 root,

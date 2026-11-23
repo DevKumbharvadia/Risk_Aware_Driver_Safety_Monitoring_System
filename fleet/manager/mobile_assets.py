@@ -10,6 +10,7 @@ from .mobile_config import (
     MOBILE_MODEL,
 )
 
+
 # Required browser JavaScript files.
 REQUIRED_JS_FILES = (
     "config.js",
@@ -23,7 +24,7 @@ REQUIRED_JS_FILES = (
 
 
 def _validate_file(path, description):
-    """Validate that a required file exists and is not empty."""
+    """Validate that a required file exists, is readable and is not empty."""
 
     if not path.is_file():
         raise FileNotFoundError(
@@ -34,6 +35,14 @@ def _validate_file(path, description):
         raise ValueError(
             f"{description} is empty: {path}"
         )
+
+    try:
+        with path.open("rb") as file:
+            file.read(1)
+    except OSError as error:
+        raise OSError(
+            f"{description} cannot be read: {path}"
+        ) from error
 
 
 def validate_mobile_assets():
@@ -51,6 +60,11 @@ def validate_mobile_assets():
         _validate_file(path, description)
 
     # Validate the behaviour classification model.
+    if MOBILE_MODEL.suffix.lower() != ".onnx":
+        raise ValueError(
+            f"Behaviour model must be an ONNX file: {MOBILE_MODEL}"
+        )
+
     _validate_file(
         MOBILE_MODEL,
         "Browser ONNX behaviour model",
@@ -89,4 +103,6 @@ def validate_mobile_assets():
             face_model.stat().st_size / (1024 * 1024),
         )
 
-    logging.info("Mobile application assets validated successfully.")
+    logging.info(
+        "Mobile application assets validated successfully."
+    )

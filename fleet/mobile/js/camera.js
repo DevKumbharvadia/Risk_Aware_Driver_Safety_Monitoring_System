@@ -1,11 +1,19 @@
 
-/* Camera preview encoding */
+"use strict";
+
+/* =========================================================
+   CAMERA PREVIEW ENCODING
+========================================================= */
 
 function makePreviewBlob() {
 
     return new Promise((resolve, reject) => {
 
-        if (!video.videoWidth || !video.videoHeight) {
+        if (
+            !video ||
+            !video.videoWidth ||
+            !video.videoHeight
+        ) {
             resolve(null);
             return;
         }
@@ -33,7 +41,9 @@ function makePreviewBlob() {
         );
 
         if (!context) {
-            reject(Error("Could not create preview context."));
+            reject(
+                Error("Could not create preview context.")
+            );
             return;
         }
 
@@ -47,10 +57,13 @@ function makePreviewBlob() {
 
         previewCanvas.toBlob(
             blob => {
+
                 if (blob) {
                     resolve(blob);
                 } else {
-                    reject(Error("Could not encode preview."));
+                    reject(
+                        Error("Could not encode preview.")
+                    );
                 }
             },
             "image/jpeg",
@@ -60,7 +73,9 @@ function makePreviewBlob() {
 }
 
 
-/* Check whether manager is viewing this phone */
+/* =========================================================
+   CHECK MANAGER PREVIEW PERMISSION
+========================================================= */
 
 async function checkPreviewSelection() {
 
@@ -81,7 +96,8 @@ async function checkPreviewSelection() {
 
         const result = await response.json();
 
-        previewEnabled = result.enabled === true;
+        previewEnabled =
+            result.enabled === true;
 
     } catch (error) {
 
@@ -93,14 +109,21 @@ async function checkPreviewSelection() {
         previewEnabled = false;
     }
 
-    $("cameraState").textContent =
-        previewEnabled
-            ? "Manager viewing"
-            : "Private";
+    const cameraState = $("cameraState");
+
+    if (cameraState) {
+
+        cameraState.textContent =
+            previewEnabled
+                ? "Manager viewing"
+                : "Private";
+    }
 }
 
 
-/* Upload one camera frame */
+/* =========================================================
+   UPLOAD ONE CAMERA FRAME
+========================================================= */
 
 async function uploadPreview() {
 
@@ -109,6 +132,7 @@ async function uploadPreview() {
         !activeTripId ||
         previewBusy ||
         !running ||
+        !video ||
         video.readyState < 2
     ) {
         return;
@@ -132,6 +156,7 @@ async function uploadPreview() {
         }
 
         if (blob.size > PREVIEW_MAX_BYTES) {
+
             console.warn(
                 "Preview exceeds maximum upload size:",
                 blob.size
@@ -146,6 +171,7 @@ async function uploadPreview() {
                 method: "POST",
 
                 headers: {
+
                     ...authHeaders(false),
 
                     "X-Trip": String(tripId),
@@ -160,6 +186,7 @@ async function uploadPreview() {
         );
 
         if (!response.ok) {
+
             console.warn(
                 "Preview rejected:",
                 response.status,
@@ -181,7 +208,9 @@ async function uploadPreview() {
 }
 
 
-/* 12 FPS preview scheduler */
+/* =========================================================
+   PREVIEW SCHEDULER
+========================================================= */
 
 async function previewLoop() {
 
@@ -191,7 +220,7 @@ async function previewLoop() {
 
     const started = performance.now();
 
-    // Check manager permission once per second.
+    /* Check manager permission once per second */
 
     if (
         !lastPreviewControlCheck ||
@@ -230,7 +259,9 @@ async function previewLoop() {
 }
 
 
-/* Stop camera preview transmission */
+/* =========================================================
+   STOP CAMERA PREVIEW TRANSMISSION
+========================================================= */
 
 function stopPreview() {
 
@@ -244,5 +275,9 @@ function stopPreview() {
 
     activeTripId = null;
 
-    $("cameraState").textContent = "Off";
+    const cameraState = $("cameraState");
+
+    if (cameraState) {
+        cameraState.textContent = "Off";
+    }
 }
