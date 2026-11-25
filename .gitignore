@@ -8,3 +8,5 @@ dist/
 show_structure.py
 reorganize_project.py
 __init__.py
+fleet.sqlite3
+fleet.log
